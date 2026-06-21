@@ -26,6 +26,17 @@ export interface DefaultMetric {
   isDefault?: boolean;
 }
 
+export interface Program {
+  id: string;
+  title: string;
+  emoji: string;
+  description: string;
+  totalWeeks: number;
+  isSystem: boolean;
+  weeks: ProgramWeek[];
+  color: string;
+}
+
 export const DEFAULT_METRICS: DefaultMetric[] = [
   {
     id: 'wake-time',
@@ -35,6 +46,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     unitLabel: '',
     isSensitive: false,
     scoreWeight: 8,
+    emoji: '🌅',
   },
   {
     id: 'make-bed',
@@ -44,6 +56,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     unitLabel: '',
     isSensitive: false,
     scoreWeight: 5,
+    emoji: '🛏️',
   },
   {
     id: 'sunlight',
@@ -53,6 +66,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     unitLabel: '',
     isSensitive: false,
     scoreWeight: 6,
+    emoji: '☀️',
   },
   {
     id: 'water',
@@ -62,6 +76,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     unitLabel: 'L',
     isSensitive: false,
     scoreWeight: 6,
+    emoji: '💧',
   },
   {
     id: 'mindfulness',
@@ -71,6 +86,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     unitLabel: '',
     isSensitive: false,
     scoreWeight: 7,
+    emoji: '🧘',
   },
   {
     id: 'sleep-time',
@@ -80,6 +96,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     unitLabel: '',
     isSensitive: false,
     scoreWeight: 8,
+    emoji: '🌙',
   },
   {
     id: 'cigarettes',
@@ -89,6 +106,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     unitLabel: 'smoked',
     isSensitive: false,
     scoreWeight: 10,
+    emoji: '🚬',
   },
   {
     id: 'alcohol',
@@ -98,6 +116,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     unitLabel: 'units',
     isSensitive: false,
     scoreWeight: 10,
+    emoji: '🍺',
   },
   {
     id: 'porn',
@@ -107,6 +126,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     unitLabel: '',
     isSensitive: true,
     scoreWeight: 12,
+    emoji: '🔞',
   },
   {
     id: 'mood',
@@ -116,6 +136,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     unitLabel: '/10',
     isSensitive: false,
     scoreWeight: 4,
+    emoji: '😊',
   },
   {
     id: 'productivity',
@@ -125,10 +146,11 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     unitLabel: '/10',
     isSensitive: false,
     scoreWeight: 4,
+    emoji: '⚡',
   },
 ];
 
-export const PROGRAM_WEEKS: ProgramWeek[] = [
+const EIGHT_WEEK_RECOVERY: ProgramWeek[] = [
   {
     weekNumber: 1,
     theme: 'Awareness & Stabilization',
@@ -226,6 +248,82 @@ export const PROGRAM_WEEKS: ProgramWeek[] = [
     ],
   },
 ];
+
+const MORNING_MASTERY_WEEKS: ProgramWeek[] = [
+  {
+    weekNumber: 1,
+    theme: 'The 5AM Blueprint',
+    goal: 'Lock in your wake time and build the morning anchor.',
+    psychologyRationale: 'Cortisol peaks within 30 min of waking — front-loading discipline wins the whole day.',
+    tasks: [
+      { id: 'mm-w1-t1', title: 'Wake at your chosen time 5/7 days', description: 'No snooze. Phone across the room.', type: 'action', isPersistent: true },
+      { id: 'mm-w1-t2', title: 'Get sunlight within 30 min of waking', description: '10 min outside — no sunglasses.', type: 'action', isPersistent: true },
+      { id: 'mm-w1-t3', title: 'No phone for first 30 minutes', description: 'Protect your cortisol window.', type: 'reduction', isPersistent: true },
+      { id: 'mm-w1-t4', title: 'Log your wake time every morning', description: 'Track the data. Watch the pattern.', type: 'reflection', isPersistent: true },
+    ],
+  },
+  {
+    weekNumber: 2,
+    theme: 'Mind Before Screens',
+    goal: 'Own your cognition before external inputs take over.',
+    psychologyRationale: 'First stimuli of the day sets the cognitive frame — protect it.',
+    tasks: [
+      { id: 'mm-w2-t1', title: '10 min journaling before any screen', description: 'Brain dump, gratitude, or 3 priorities.', type: 'reflection', isPersistent: true },
+      { id: 'mm-w2-t2', title: '5 min cold water face splash or cold shower', description: 'Activates alertness fast.', type: 'action', isPersistent: true },
+      { id: 'mm-w2-t3', title: 'Write 3 MIT (Most Important Tasks)', description: 'Before breakfast, know your 3 non-negotiables.', type: 'reflection', isPersistent: true },
+      { id: 'mm-w2-t4', title: 'No social media before 9am', description: 'Build the habit of delaying reactive mode.', type: 'reduction', isPersistent: true },
+    ],
+  },
+  {
+    weekNumber: 3,
+    theme: 'Body Activation',
+    goal: 'Move first — prime the nervous system for the day.',
+    psychologyRationale: 'Morning exercise elevates BDNF — brain-derived growth factor — for 4-6 hours post-workout.',
+    tasks: [
+      { id: 'mm-w3-t1', title: 'Morning movement 5/7 days', description: 'Walk, run, gym, yoga — minimum 20 min.', type: 'action', isPersistent: true },
+      { id: 'mm-w3-t2', title: 'Hydrate immediately on waking', description: '500ml water before coffee.', type: 'action', isPersistent: true },
+      { id: 'mm-w3-t3', title: 'No caffeine before 9:30am', description: 'Let adenosine clear first.', type: 'reduction', isPersistent: true },
+      { id: 'mm-w3-t4', title: 'Rate your morning energy 1-10 each day', description: 'Track what makes it higher or lower.', type: 'reflection', isPersistent: true },
+    ],
+  },
+  {
+    weekNumber: 4,
+    theme: 'The Locked Routine',
+    goal: 'Systematize the whole morning into one automatic stack.',
+    psychologyRationale: 'Habits stack on each other — chaining reduces decision fatigue to near-zero.',
+    tasks: [
+      { id: 'mm-w4-t1', title: 'Write your full morning protocol', description: 'Time-blocked, step by step.', type: 'reflection', isPersistent: false },
+      { id: 'mm-w4-t2', title: 'Execute full protocol 6/7 days', description: 'Every step, every day.', type: 'action', isPersistent: true },
+      { id: 'mm-w4-t3', title: 'Prepare the night before', description: 'Clothes, gym bag, journal — ready before bed.', type: 'action', isPersistent: true },
+      { id: 'mm-w4-t4', title: 'Assess: what still breaks your mornings?', description: 'Write it in journal. Fix it for Week 5.', type: 'reflection', isPersistent: false },
+    ],
+  },
+];
+
+export const AVAILABLE_PROGRAMS: Program[] = [
+  {
+    id: 'eight-week-recovery',
+    title: '8-Week Recovery Protocol',
+    emoji: '🧭',
+    description: 'Science-backed behavioral reset: quit or reduce harmful habits, rebuild physical health, and install an identity that makes discipline inevitable.',
+    totalWeeks: 8,
+    isSystem: true,
+    color: '#6366f1',
+    weeks: EIGHT_WEEK_RECOVERY,
+  },
+  {
+    id: 'morning-mastery',
+    title: 'Morning Mastery (4 Weeks)',
+    emoji: '🌅',
+    description: 'Build an unbreakable morning routine that primes your mind, body, and focus before the world gets a chance to derail you.',
+    totalWeeks: 4,
+    isSystem: true,
+    color: '#f59e0b',
+    weeks: MORNING_MASTERY_WEEKS,
+  },
+];
+
+export const PROGRAM_WEEKS = EIGHT_WEEK_RECOVERY;
 
 export const DAILY_JOURNAL_PROMPTS: Record<number, string[]> = {
   1: [

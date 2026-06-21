@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { DEFAULT_METRICS, DefaultMetric, PROGRAM_WEEKS } from '@/constants/program';
+import { AVAILABLE_PROGRAMS, DEFAULT_METRICS, DefaultMetric, Program, PROGRAM_WEEKS } from '@/constants/program';
 
 export interface UserProfile {
   name: string;
@@ -11,6 +11,15 @@ export interface UserProfile {
   totalXP: number;
   highestStreak: number;
   badges: string[];
+  activeProgramIds: string[];
+  programProgress: Record<string, ProgramProgress>;
+}
+
+export interface ProgramProgress {
+  currentWeek: number;
+  weekStartDate: string;
+  completedWeeks: number[];
+  resetCount: number;
 }
 
 export interface TrackedMetric extends DefaultMetric {
@@ -49,6 +58,7 @@ export interface WeekTaskProgress {
   weekNumber: number;
   taskId: string;
   completed: boolean;
+  programId?: string;
 }
 
 export interface Badge {
@@ -57,6 +67,17 @@ export interface Badge {
   name: string;
   description: string;
   requirement: string;
+}
+
+export interface WeekGatingStatus {
+  daysTracked: number;
+  daysJournaled: number;
+  tasksCompleted: number;
+  totalTasks: number;
+  canAdvance: boolean;
+  shouldRestart: boolean;
+  daysSinceWeekStart: number;
+  weekPassThreshold: number;
 }
 
 export const BADGES: Badge[] = [
@@ -94,6 +115,7 @@ interface AppContextType {
   badges: string[];
   dayScore: number;
   completionPct: number;
+  availablePrograms: Program[];
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
   logMetric: (metricId: string, date: string, value: number, note?: string) => Promise<void>;
   getLogForDate: (metricId: string, date: string) => DailyLog | undefined;
@@ -102,9 +124,10 @@ interface AppContextType {
   addJournalEntry: (entry: Omit<JournalEntry, 'id' | 'wordCount' | 'tags'>) => Promise<void>;
   getJournalEntryForDate: (date: string) => JournalEntry | undefined;
   addRelapseLog: (log: Omit<RelapseLog, 'id'>) => Promise<void>;
-  toggleWeekTask: (weekNumber: number, taskId: string) => Promise<void>;
-  isWeekTaskComplete: (weekNumber: number, taskId: string) => boolean;
+  toggleWeekTask: (weekNumber: number, taskId: string, programId?: string) => Promise<void>;
+  isWeekTaskComplete: (weekNumber: number, taskId: string, programId?: string) => boolean;
   addCustomMetric: (metric: Omit<TrackedMetric, 'id' | 'isDefault' | 'isCustom'>) => Promise<void>;
+  deleteMetric: (metricId: string) => Promise<void>;
   focusMinutesToday: number;
   addFocusMinutes: (minutes: number) => Promise<void>;
   addXP: (amount: number) => void;
@@ -112,6 +135,14 @@ interface AppContextType {
   getStreakRisk: () => boolean;
   getMissedDays: (days: number) => string[];
   getRecentActivity: (count: number) => ActivityItem[];
+  getMetricStreak: (metricId: string) => number;
+  getMetricConsistency: (metricId: string, days: number) => number;
+  enrollProgram: (programId: string) => Promise<void>;
+  unenrollProgram: (programId: string) => Promise<void>;
+  advanceProgramWeek: (programId: string) => Promise<void>;
+  restartProgramWeek: (programId: string) => Promise<void>;
+  getWeekGatingStatus: (programId: string) => WeekGatingStatus;
+  getProgramProgress: (programId: string) => ProgramProgress | undefined;
 }
 
 export interface ActivityItem {
@@ -142,6 +173,15 @@ const DEFAULT_PROFILE: UserProfile = {
   totalXP: 0,
   highestStreak: 0,
   badges: [],
+  activeProgramIds: ['eight-week-recovery'],
+  programProgress: {
+    'eight-week-recovery': {
+      currentWeek: 1,
+      weekStartDate: new Date().toISOString().split('T')[0],
+      completedWeeks: [],
+      resetCount: 0,
+    },
+  },
 };
 
 function generateId(): string {
@@ -202,6 +242,18 @@ function computeStreak(logDates: Set<string>, endDate: Date) {
   return streak;
 }
 
+function datesBetween(startDate: string, endDate: string): string[] {
+  const dates: string[] = [];
+  const start = new Date(startDate + 'T12:00:00');
+  const end = new Date(endDate + 'T12:00:00');
+  const d = new Date(start);
+  while (d <= end) {
+    dates.push(d.toISOString().split('T')[0]);
+    d.setDate(d.getDate() + 1);
+  }
+  return dates;
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
   const [metrics, setMetrics] = useState<TrackedMetric[]>(DEFAULT_METRICS);
@@ -224,7 +276,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         AsyncStorage.getItem('weekTaskProgress'),
         AsyncStorage.getItem(`focusMinutes_${new Date().toISOString().split('T')[0]}`),
       ]);
-      if (profileRaw) setProfile({ ...DEFAULT_PROFILE, ...JSON.parse(profileRaw) });
+      if (profileRaw) {
+        const parsed = JSON.parse(profileRaw);
+        const merged = { ...DEFAULT_PROFILE, ...parsed };
+        if (!merged.activeProgramIds) merged.activeProgramIds = ['eight-week-recovery'];
+        if (!merged.programProgress) {
+          merged.programProgress = {
+            'eight-week-recovery': {
+              currentWeek: merged.currentWeek ?? 1,
+              weekStartDate: merged.startDate ?? new Date().toISOString().split('T')[0],
+              completedWeeks: [],
+              resetCount: 0,
+            },
+          };
+        }
+        setProfile(merged);
+      }
       if (metricsRaw) {
         const saved: TrackedMetric[] = JSON.parse(metricsRaw);
         const defaults = DEFAULT_METRICS.filter(d => !saved.find(s => s.id === d.id));
@@ -257,7 +324,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const addXP = useCallback((amount: number, reason?: string) => {
+  const addXP = useCallback((amount: number) => {
     setProfile(prev => {
       const next = { ...prev, totalXP: prev.totalXP + amount };
       AsyncStorage.setItem('profile', JSON.stringify(next));
@@ -310,7 +377,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const existing = prev.findIndex(l => l.metricId === metricId && l.date === date);
       let next: DailyLog[];
       if (existing >= 0) {
-        next = prev.map((l, i) => i === existing ? { ...l, value, note } : l);
+        next = prev.map((l, i) => i === existing ? { ...l, value, ...(note !== undefined ? { note } : {}) } : l);
       } else {
         next = [...prev, { id: generateId(), metricId, date, value, note }];
       }
@@ -338,6 +405,50 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     return result;
   }, [dailyLogs]);
+
+  const getMetricStreak = useCallback((metricId: string): number => {
+    const metric = metrics.find(m => m.id === metricId);
+    if (!metric) return 0;
+    let streak = 0;
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    while (d.getTime() >= new Date('2024-01-01').getTime()) {
+      const ds = d.toISOString().split('T')[0];
+      const log = dailyLogs.find(l => l.metricId === metricId && l.date === ds);
+      if (!log) break;
+      const good = metric.category === 'build'
+        ? log.value > 0
+        : metric.category === 'reduce'
+          ? log.value === 0
+          : true;
+      if (good) { streak++; d.setDate(d.getDate() - 1); }
+      else break;
+    }
+    return streak;
+  }, [dailyLogs, metrics]);
+
+  const getMetricConsistency = useCallback((metricId: string, days: number): number => {
+    const metric = metrics.find(m => m.id === metricId);
+    if (!metric) return 0;
+    let successes = 0;
+    let total = 0;
+    for (let i = 0; i < days; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const ds = d.toISOString().split('T')[0];
+      const log = dailyLogs.find(l => l.metricId === metricId && l.date === ds);
+      if (log) {
+        total++;
+        const good = metric.category === 'build'
+          ? log.value > 0
+          : metric.category === 'reduce'
+            ? log.value === 0
+            : true;
+        if (good) successes++;
+      }
+    }
+    return total > 0 ? Math.round((successes / total) * 100) : 0;
+  }, [dailyLogs, metrics]);
 
   const addJournalEntry = useCallback(async (entry: Omit<JournalEntry, 'id' | 'wordCount' | 'tags'>) => {
     const wordCount = entry.response.trim().split(/\s+/).filter(w => w.length > 0).length;
@@ -377,22 +488,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const toggleWeekTask = useCallback(async (weekNumber: number, taskId: string) => {
+  const toggleWeekTask = useCallback(async (weekNumber: number, taskId: string, programId?: string) => {
     setWeekTaskProgress(prev => {
-      const existing = prev.findIndex(p => p.weekNumber === weekNumber && p.taskId === taskId);
+      const existing = prev.findIndex(p =>
+        p.weekNumber === weekNumber && p.taskId === taskId && (p.programId ?? 'eight-week-recovery') === (programId ?? 'eight-week-recovery')
+      );
       let next: WeekTaskProgress[];
       if (existing >= 0) {
         next = prev.map((p, i) => i === existing ? { ...p, completed: !p.completed } : p);
       } else {
-        next = [...prev, { weekNumber, taskId, completed: true }];
+        next = [...prev, { weekNumber, taskId, completed: true, programId: programId ?? 'eight-week-recovery' }];
       }
       AsyncStorage.setItem('weekTaskProgress', JSON.stringify(next));
       return next;
     });
   }, []);
 
-  const isWeekTaskComplete = useCallback((weekNumber: number, taskId: string) => {
-    return weekTaskProgress.some(p => p.weekNumber === weekNumber && p.taskId === taskId && p.completed);
+  const isWeekTaskComplete = useCallback((weekNumber: number, taskId: string, programId?: string) => {
+    const pid = programId ?? 'eight-week-recovery';
+    return weekTaskProgress.some(p =>
+      p.weekNumber === weekNumber && p.taskId === taskId && p.completed &&
+      (p.programId === pid || (!p.programId && pid === 'eight-week-recovery'))
+    );
   }, [weekTaskProgress]);
 
   const addCustomMetric = useCallback(async (metric: Omit<TrackedMetric, 'id' | 'isDefault' | 'isCustom'>) => {
@@ -409,13 +526,163 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const deleteMetric = useCallback(async (metricId: string) => {
+    setMetrics(prev => {
+      const next = prev.filter(m => m.id !== metricId);
+      AsyncStorage.setItem('metrics', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   const addFocusMinutes = useCallback(async (minutes: number) => {
     setFocusMinutesToday(prev => {
       const next = prev + minutes;
       AsyncStorage.setItem(`focusMinutes_${today}`, String(next));
       return next;
     });
+  }, [today]);
+
+  const enrollProgram = useCallback(async (programId: string) => {
+    setProfile(prev => {
+      if (prev.activeProgramIds.includes(programId)) return prev;
+      const next = {
+        ...prev,
+        activeProgramIds: [...prev.activeProgramIds, programId],
+        programProgress: {
+          ...prev.programProgress,
+          [programId]: {
+            currentWeek: 1,
+            weekStartDate: new Date().toISOString().split('T')[0],
+            completedWeeks: [],
+            resetCount: 0,
+          },
+        },
+      };
+      AsyncStorage.setItem('profile', JSON.stringify(next));
+      return next;
+    });
   }, []);
+
+  const unenrollProgram = useCallback(async (programId: string) => {
+    setProfile(prev => {
+      const next = {
+        ...prev,
+        activeProgramIds: prev.activeProgramIds.filter(id => id !== programId),
+      };
+      AsyncStorage.setItem('profile', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const getWeekGatingStatus = useCallback((programId: string): WeekGatingStatus => {
+    const prog = AVAILABLE_PROGRAMS.find(p => p.id === programId);
+    const progress = profile.programProgress[programId];
+    if (!prog || !progress) {
+      return { daysTracked: 0, daysJournaled: 0, tasksCompleted: 0, totalTasks: 0, canAdvance: false, shouldRestart: false, daysSinceWeekStart: 0, weekPassThreshold: 5 };
+    }
+    const weekData = prog.weeks[progress.currentWeek - 1];
+    if (!weekData) {
+      return { daysTracked: 0, daysJournaled: 0, tasksCompleted: 0, totalTasks: 0, canAdvance: false, shouldRestart: false, daysSinceWeekStart: 0, weekPassThreshold: 5 };
+    }
+
+    const weekStart = progress.weekStartDate;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const weekDays = datesBetween(weekStart, todayStr);
+    const daysSinceWeekStart = weekDays.length - 1;
+
+    const PASS_THRESHOLD = 5;
+
+    const daysTracked = weekDays.filter(d => {
+      const dayLogs = dailyLogs.filter(l => l.date === d);
+      return dayLogs.length > 0;
+    }).length;
+
+    const daysJournaled = weekDays.filter(d =>
+      journalEntries.some(e => e.date === d)
+    ).length;
+
+    const tasksCompleted = weekData.tasks.filter(t =>
+      isWeekTaskComplete(progress.currentWeek, t.id, programId)
+    ).length;
+    const totalTasks = weekData.tasks.length;
+
+    const canAdvance = daysTracked >= PASS_THRESHOLD && daysJournaled >= 1 && tasksCompleted >= Math.ceil(totalTasks * 0.5);
+    const shouldRestart = daysSinceWeekStart >= 14 && !canAdvance;
+
+    return {
+      daysTracked,
+      daysJournaled,
+      tasksCompleted,
+      totalTasks,
+      canAdvance,
+      shouldRestart,
+      daysSinceWeekStart,
+      weekPassThreshold: PASS_THRESHOLD,
+    };
+  }, [profile.programProgress, dailyLogs, journalEntries, isWeekTaskComplete]);
+
+  const advanceProgramWeek = useCallback(async (programId: string) => {
+    const prog = AVAILABLE_PROGRAMS.find(p => p.id === programId);
+    const progress = profile.programProgress[programId];
+    if (!prog || !progress) return;
+
+    const newWeek = Math.min(progress.currentWeek + 1, prog.totalWeeks);
+    const newCompletedWeeks = progress.completedWeeks.includes(progress.currentWeek)
+      ? progress.completedWeeks
+      : [...progress.completedWeeks, progress.currentWeek];
+
+    setProfile(prev => {
+      const next = {
+        ...prev,
+        currentWeek: programId === 'eight-week-recovery' ? newWeek : prev.currentWeek,
+        programProgress: {
+          ...prev.programProgress,
+          [programId]: {
+            ...progress,
+            currentWeek: newWeek,
+            weekStartDate: new Date().toISOString().split('T')[0],
+            completedWeeks: newCompletedWeeks,
+          },
+        },
+      };
+      AsyncStorage.setItem('profile', JSON.stringify(next));
+      return next;
+    });
+  }, [profile.programProgress]);
+
+  const restartProgramWeek = useCallback(async (programId: string) => {
+    const progress = profile.programProgress[programId];
+    if (!progress) return;
+
+    setWeekTaskProgress(prev => {
+      const next = prev.filter(p => !(
+        (p.programId === programId || (!p.programId && programId === 'eight-week-recovery'))
+        && p.weekNumber === progress.currentWeek
+      ));
+      AsyncStorage.setItem('weekTaskProgress', JSON.stringify(next));
+      return next;
+    });
+
+    setProfile(prev => {
+      const next = {
+        ...prev,
+        programProgress: {
+          ...prev.programProgress,
+          [programId]: {
+            ...progress,
+            weekStartDate: new Date().toISOString().split('T')[0],
+            resetCount: (progress.resetCount ?? 0) + 1,
+          },
+        },
+      };
+      AsyncStorage.setItem('profile', JSON.stringify(next));
+      return next;
+    });
+  }, [profile.programProgress]);
+
+  const getProgramProgress = useCallback((programId: string) => {
+    return profile.programProgress[programId];
+  }, [profile.programProgress]);
 
   const getStreak = useCallback(() => currentStreak, [currentStreak]);
 
@@ -439,9 +706,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const getRecentActivity = useCallback((count: number): ActivityItem[] => {
     const items: ActivityItem[] = [];
-    const today = new Date().toISOString().split('T')[0];
-    const todayLogs = dailyLogs.filter(l => l.date === today);
-    for (const log of todayLogs) {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayLogsArr = dailyLogs.filter(l => l.date === todayStr);
+    for (const log of todayLogsArr) {
       const metric = metrics.find(m => m.id === log.metricId);
       if (!metric) continue;
       const isGood = metric.category === 'build' ? log.value > 0 : (metric.category === 'reduce' ? log.value === 0 : true);
@@ -452,16 +719,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         time: 'Today', xp: isGood ? 10 : 0,
       });
     }
-    const journalToday = journalEntries.find(e => e.date === today);
+    const journalToday = journalEntries.find(e => e.date === todayStr);
     if (journalToday) {
       items.push({
-        id: journalToday.id, type: 'journal', date: today,
+        id: journalToday.id, type: 'journal', date: todayStr,
         emoji: '📝', text: 'Journal entry saved', time: 'Today', xp: 25,
       });
     }
     if (focusMinutesToday > 0) {
       items.push({
-        id: generateId(), type: 'focus', date: today,
+        id: generateId(), type: 'focus', date: todayStr,
         emoji: '🎨', text: `${focusMinutesToday} min deep work`, time: 'Today', xp: Math.min(focusMinutesToday, 10),
       });
     }
@@ -487,6 +754,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       badges: profile.badges,
       dayScore,
       completionPct,
+      availablePrograms: AVAILABLE_PROGRAMS,
       updateProfile,
       logMetric,
       getLogForDate,
@@ -498,6 +766,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toggleWeekTask,
       isWeekTaskComplete,
       addCustomMetric,
+      deleteMetric,
       focusMinutesToday,
       addFocusMinutes,
       addXP,
@@ -505,6 +774,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getStreakRisk,
       getMissedDays,
       getRecentActivity,
+      getMetricStreak,
+      getMetricConsistency,
+      enrollProgram,
+      unenrollProgram,
+      advanceProgramWeek,
+      restartProgramWeek,
+      getWeekGatingStatus,
+      getProgramProgress,
     }}>
       {children}
     </AppContext.Provider>
