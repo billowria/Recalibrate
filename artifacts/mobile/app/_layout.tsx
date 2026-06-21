@@ -15,8 +15,30 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider } from "@/context/AppContext";
+import * as Notifications from "expo-notifications";
+import { Platform } from "react-native";
 
 SplashScreen.preventAutoHideAsync();
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  } as any),
+});
+
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationCategoryAsync('streak', [
+    {
+      identifier: 'log',
+      buttonTitle: 'Log now',
+      options: { opensAppToForeground: true },
+    },
+  ]);
+}
 
 const queryClient = new QueryClient();
 

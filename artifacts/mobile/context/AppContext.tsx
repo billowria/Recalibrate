@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { AVAILABLE_PROGRAMS, DEFAULT_METRICS, DefaultMetric, Program, PROGRAM_WEEKS } from '@/constants/program';
+import { updateStreakRiskFromLog } from '@/notifications/manager';
 
 export interface UserProfile {
   name: string;
@@ -16,6 +17,7 @@ export interface UserProfile {
   onboardingComplete?: boolean;
   selectedBuildMetricIds?: string[];
   selectedReduceMetricIds?: string[];
+  notificationSettings?: import('@/notifications/manager').NotificationSettings;
 }
 
 export interface ProgramProgress {
@@ -532,7 +534,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       AsyncStorage.setItem('dailyLogs', JSON.stringify(next));
       return next;
     });
-  }, []);
+    const currentStreakVal = currentStreak;
+    if (currentStreakVal > 0) {
+      updateStreakRiskFromLog(currentStreakVal);
+    }
+  }, [currentStreak]);
 
   const getLogForDate = useCallback((metricId: string, date: string) => {
     return dailyLogs.find(l => l.metricId === metricId && l.date === date);

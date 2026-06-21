@@ -17,6 +17,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, BADGES } from '@/context/AppContext';
 import { useColors } from '@/hooks/useColors';
 import { AVAILABLE_PROGRAMS } from '@/constants/program';
+import {
+  NotificationSettings,
+  getNotificationSettings,
+  setNotificationSettings,
+  requestNotificationPermissions,
+  areNotificationsEnabled,
+  setupAllNotifications,
+} from '@/notifications/manager';
 
 const SCORE_WEIGHT_LABELS = [
   { label: 'Build habits', pct: 38, color: '#22c55e' },
@@ -63,7 +71,41 @@ export default function ProfileScreen() {
   const [nameInput, setNameInput] = useState(profile.name);
   const [wakeInput, setWakeInput] = useState(profile.wakeTime);
   const [bedInput, setBedInput] = useState(profile.bedTime);
+  const [notifSettings, setNotifSettings] = useState<NotificationSettings | null>(null);
+  const [notifPermGranted, setNotifPermGranted] = useState(false);
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
+
+  React.useEffect(() => {
+    getNotificationSettings().then(setNotifSettings);
+    areNotificationsEnabled().then(setNotifPermGranted);
+  }, []);
+
+  const handleToggleNotif = async (key: keyof NotificationSettings) => {
+    if (!notifSettings) return;
+    const next = { ...notifSettings, [key]: !notifSettings[key] };
+    setNotifSettings(next);
+    await setNotificationSettings({ [key]: !notifSettings[key] });
+    if (key === 'enabled') {
+      if (!notifSettings.enabled) {
+        const granted = await requestNotificationPermissions();
+        setNotifPermGranted(granted);
+        if (granted) {
+          await setupAllNotifications(next);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } else {
+          Alert.alert('Permission denied', 'Enable notifications in your device settings to use reminders.');
+          setNotifSettings({ ...notifSettings, enabled: false });
+          await setNotificationSettings({ enabled: false });
+        }
+      } else {
+        await setupAllNotifications(next);
+      }
+    } else {
+      await setupAllNotifications(next);
+    }
+  };
+
+  const notifWebDisabled = Platform.OS === 'web';
 
   const totalDaysTracked = new Set(dailyLogs.map(l => l.date)).size;
   const avgDailyLogs = totalDaysTracked > 0 ? Math.round(dailyLogs.length / totalDaysTracked) : 0;
@@ -270,6 +312,62 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {/* ─── NOTIFICATIONS ─── */}
+      <SectionHeader title="NOTIFICATIONS" colors={colors} />
+      <View style={[styles.notifCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+        <TouchableOpacity
+          onPress={() => !notifWebDisabled && handleToggleNotif('enabled')}
+          activeOpacity={notifWebDisabled ? 1 : 0.7}
+          style={[styles.notifRow, { opacity: notifWebDisabled ? 0.5 : 1 }]}
+        >
+          <View style={styles.notifLeft}>
+            <Ionicons name="notifications-outline" size={18} color={colors.primary} />
+            <Text style={[styles.notifLabel, { color: colors.foreground }]}>Push notifications</Text>
+          </View>
+          <View style={[styles.notifToggle, { backgroundColor: (notifSettings?.enabled ?? false) ? colors.primary : colors.border }]}>
+            <View style={[styles.notifToggleDot, {
+              backgroundColor: '#fff',
+              transform: [{ translateX: (notifSettings?.enabled ?? false) ? 14 : 0 }],
+            }]} />
+          </View>
+        </TouchableOpacity>
+        {notifWebDisabled && (
+          <Text style={[styles.notifWebNote, { color: colors.mutedForeground }]}>
+            Notifications are only available on native iOS/Android.
+          </Text>
+        )}
+        {(notifSettings?.enabled ?? false) && (
+          <>
+            <View style={[styles.notifDivider, { backgroundColor: colors.border }]} />
+            {[
+              { key: 'trackingReminder' as const, label: 'Morning reminder', icon: 'sunny-outline' as const },
+              { key: 'eveningReminder' as const, label: 'Evening reminder', icon: 'moon-outline' as const },
+              { key: 'journalReminder' as const, label: 'Journal prompt', icon: 'book-outline' as const },
+              { key: 'streakRiskReminder' as const, label: 'Streak at-risk', icon: 'flame-outline' as const },
+              { key: 'pomodoroReminder' as const, label: 'Focus session', icon: 'time-outline' as const },
+            ].map(item => (
+              <TouchableOpacity
+                key={item.key}
+                onPress={() => handleToggleNotif(item.key)}
+                style={styles.notifSubRow}
+                activeOpacity={0.7}
+              >
+                <View style={styles.notifLeft}>
+                  <Ionicons name={item.icon} size={14} color={colors.mutedForeground} />
+                  <Text style={[styles.notifSubLabel, { color: colors.foreground }]}>{item.label}</Text>
+                </View>
+                <View style={[styles.notifCheck, {
+                  borderColor: (notifSettings?.[item.key] ?? false) ? colors.primary : colors.border,
+                  backgroundColor: (notifSettings?.[item.key] ?? false) ? colors.primary : 'transparent',
+                }]}>
+                  {(notifSettings?.[item.key] ?? false) && <Ionicons name="checkmark" size={10} color="#fff" />}
+                </View>
+              </TouchableOpacity>
+            ))}
+          </>
+        )}
+      </View>
+
       {/* ─── TIMES ─── */}
       <SectionHeader title="DAILY TARGETS" colors={colors} />
       <View style={[styles.timesCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
@@ -428,4 +526,15 @@ const styles = StyleSheet.create({
   dataActionSub: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 1 },
   reOnboardBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderStyle: 'dashed', paddingVertical: 13 },
   reOnboardText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
+  notifCard: { borderWidth: 1, padding: 14, gap: 0 },
+  notifRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
+  notifLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  notifLabel: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  notifToggle: { width: 38, height: 22, borderRadius: 11, padding: 3, justifyContent: 'center' },
+  notifToggleDot: { width: 16, height: 16, borderRadius: 8 },
+  notifWebNote: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 4 },
+  notifDivider: { height: 1, marginVertical: 8 },
+  notifSubRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
+  notifSubLabel: { fontSize: 13, fontFamily: 'Inter_500Medium' },
+  notifCheck: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
 });
