@@ -58,28 +58,26 @@ const reqStyles = StyleSheet.create({
   value: { fontSize: 12, fontFamily: 'Inter_700Bold' },
 });
 
-function ProgramCard({ program, isActive, onToggle, colors }: {
+function ProgramCard({ program, isActive, onToggle, onSelect, colors, compact }: {
   program: Program;
   isActive: boolean;
   onToggle: () => void;
+  onSelect: () => void;
   colors: any;
+  compact?: boolean;
 }) {
   const { getProgramProgress } = useApp();
   const progress = getProgramProgress(program.id);
   const pct = progress ? (progress.completedWeeks.length / program.totalWeeks) * 100 : 0;
 
   return (
-    <TouchableOpacity
-      onPress={onToggle}
-      style={[progCardStyles.card, {
-        backgroundColor: colors.card,
-        borderColor: isActive ? program.color : colors.border,
-        borderWidth: isActive ? 2 : 1,
-        borderRadius: colors.radius,
-      }]}
-      activeOpacity={0.8}
-    >
-      <View style={progCardStyles.top}>
+    <View style={[progCardStyles.card, {
+      backgroundColor: colors.card,
+      borderColor: isActive ? program.color : colors.border,
+      borderWidth: isActive ? 2 : 1,
+      borderRadius: colors.radius,
+    }]}>
+      <TouchableOpacity onPress={onSelect} style={progCardStyles.top} activeOpacity={0.8}>
         <View style={[progCardStyles.emojiWrap, { backgroundColor: program.color + '18' }]}>
           <Text style={progCardStyles.emoji}>{program.emoji}</Text>
         </View>
@@ -87,19 +85,7 @@ function ProgramCard({ program, isActive, onToggle, colors }: {
           <Text style={[progCardStyles.title, { color: colors.foreground }]}>{program.title}</Text>
           <Text style={[progCardStyles.weeks, { color: colors.mutedForeground }]}>{program.totalWeeks} weeks</Text>
         </View>
-        <View style={[progCardStyles.statusBadge, {
-          backgroundColor: isActive ? program.color + '18' : colors.border + '80',
-        }]}>
-          <Ionicons
-            name={isActive ? 'checkmark-circle' : 'add-circle-outline'}
-            size={16}
-            color={isActive ? program.color : colors.mutedForeground}
-          />
-          <Text style={[progCardStyles.statusText, { color: isActive ? program.color : colors.mutedForeground }]}>
-            {isActive ? 'Active' : 'Enroll'}
-          </Text>
-        </View>
-      </View>
+      </TouchableOpacity>
       <Text style={[progCardStyles.desc, { color: colors.mutedForeground }]} numberOfLines={2}>
         {program.description}
       </Text>
@@ -113,7 +99,26 @@ function ProgramCard({ program, isActive, onToggle, colors }: {
           </Text>
         </View>
       )}
-    </TouchableOpacity>
+      <View style={progCardStyles.actionRow}>
+        <TouchableOpacity
+          onPress={onToggle}
+          style={[progCardStyles.toggleBtn, {
+            backgroundColor: isActive ? '#ef444412' : program.color + '15',
+            borderColor: isActive ? '#ef444440' : program.color + '40',
+          }]}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name={isActive ? 'pause-circle-outline' : 'play-circle-outline'}
+            size={16}
+            color={isActive ? '#ef4444' : program.color}
+          />
+          <Text style={[progCardStyles.toggleText, { color: isActive ? '#ef4444' : program.color }]}>
+            {isActive ? 'Pause' : 'Activate'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
@@ -131,6 +136,9 @@ const progCardStyles = StyleSheet.create({
   progressBg: { height: 4, borderRadius: 2, overflow: 'hidden' },
   progressFill: { height: 4, borderRadius: 2 },
   progressLabel: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
+  actionRow: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  toggleBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
+  toggleText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
 });
 
 export default function ProgramScreen() {
@@ -215,19 +223,10 @@ export default function ProgramScreen() {
     );
   };
 
-  const handleToggleEnroll = async () => {
+  const handleToggleActive = async () => {
     if (isEnrolled) {
-      Alert.alert(
-        'Leave Program?',
-        'Your progress will be saved. You can re-enroll anytime.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Leave', style: 'destructive', onPress: async () => {
-            await unenrollProgram(selectedProgramId);
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          }},
-        ]
-      );
+      await unenrollProgram(selectedProgramId);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     } else {
       await enrollProgram(selectedProgramId);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -284,13 +283,17 @@ export default function ProgramScreen() {
               key={p.id}
               program={p}
               isActive={profile.activeProgramIds.includes(p.id)}
-              onToggle={async () => {
+              onSelect={() => {
                 setSelectedProgramId(p.id);
-                if (!profile.activeProgramIds.includes(p.id)) {
+                setShowProgramList(false);
+              }}
+              onToggle={async () => {
+                if (profile.activeProgramIds.includes(p.id)) {
+                  await unenrollProgram(p.id);
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                } else {
                   await enrollProgram(p.id);
                   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                } else {
-                  setShowProgramList(false);
                 }
               }}
               colors={colors}
@@ -379,6 +382,14 @@ export default function ProgramScreen() {
             </View>
 
             <View style={styles.actionRow}>
+              <TouchableOpacity
+                onPress={handleToggleActive}
+                style={[styles.pauseBtn, { borderColor: colors.border }]}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="pause-circle-outline" size={16} color="#ef4444" />
+                <Text style={[styles.pauseBtnText, { color: '#ef4444' }]}>Pause program</Text>
+              </TouchableOpacity>
               {gating?.canAdvance && progress.currentWeek < selectedProgram.totalWeeks ? (
                 <TouchableOpacity
                   onPress={handleAdvanceWeek}
@@ -631,12 +642,12 @@ export default function ProgramScreen() {
           <Text style={[styles.enrollTitle, { color: colors.foreground }]}>{selectedProgram.title}</Text>
           <Text style={[styles.enrollDesc, { color: colors.mutedForeground }]}>{selectedProgram.description}</Text>
           <TouchableOpacity
-            onPress={handleToggleEnroll}
+            onPress={handleToggleActive}
             style={[styles.enrollBtn, { backgroundColor: programColor }]}
             activeOpacity={0.85}
           >
             <Ionicons name="add-circle-outline" size={20} color="#fff" />
-            <Text style={styles.enrollBtnText}>Enroll in Program</Text>
+            <Text style={styles.enrollBtnText}>Activate Program</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -740,4 +751,6 @@ const styles = StyleSheet.create({
   enrollDesc: { fontSize: 13, fontFamily: 'Inter_400Regular', lineHeight: 19, textAlign: 'center' },
   enrollBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12, marginTop: 4 },
   enrollBtnText: { fontSize: 15, fontFamily: 'Inter_700Bold', color: '#fff' },
+  pauseBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1 },
+  pauseBtnText: { fontSize: 12, fontFamily: 'Inter_500Medium' },
 });
