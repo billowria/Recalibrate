@@ -15,11 +15,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/context/AppContext';
 import { useColors } from '@/hooks/useColors';
 import { PROGRAM_WEEKS } from '@/constants/program';
+import { BADGES } from '@/context/AppContext';
 
 export default function ProfileScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { profile, updateProfile, metrics, dailyLogs, journalEntries, relapseLogs, disciplineScore } = useApp();
+  const { profile, updateProfile, metrics, dailyLogs, journalEntries, relapseLogs, disciplineScore, totalXP, currentLevel, currentStreak, highestStreak, badges, levelProgress, levelMax } = useApp();
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(profile.name);
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
@@ -98,24 +99,65 @@ export default function ProfileScreen() {
         </Text>
       </View>
 
-      <View style={styles.statsGrid}>
-        {[
-          { label: 'Today\'s Score', value: `${avgScore}`, icon: 'pulse', color: avgScore >= 75 ? colors.scoreGreen : avgScore >= 40 ? colors.scoreYellow : colors.scoreRed },
-          { label: 'Days Tracked', value: `${totalDaysTracked}`, icon: 'calendar', color: colors.primary },
-          { label: 'Journal Entries', value: `${journalEntries.length}`, icon: 'book', color: colors.accent },
-          { label: 'Setbacks Logged', value: `${relapseLogs.length}`, icon: 'refresh', color: colors.scoreYellow },
-        ].map(stat => (
-          <View key={stat.label} style={[styles.statCard, {
-            backgroundColor: colors.card,
-            borderColor: colors.border,
-            borderRadius: colors.radius,
-          }]}>
-            <Ionicons name={stat.icon as any} size={22} color={stat.color} />
-            <Text style={[styles.statValue, { color: colors.foreground }]}>{stat.value}</Text>
-            <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>{stat.label}</Text>
+      <View style={[styles.gamifyCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+        <View style={styles.gamifyRow}>
+          <View style={styles.gamifyBlock}>
+            <Text style={[styles.gamifyNum, { color: colors.primary }]}>{totalXP}</Text>
+            <Text style={[styles.gamifyLabel, { color: colors.mutedForeground }]}>Total XP</Text>
           </View>
-        ))}
+          <View style={styles.gamifyDivider} />
+          <View style={styles.gamifyBlock}>
+            <Text style={[styles.gamifyNum, { color: colors.foreground }]}>LVL {currentLevel}</Text>
+            <View style={[styles.levelBarBg, { backgroundColor: colors.border }]}>
+              <View style={[styles.levelBarFill, { width: `${(levelProgress / levelMax) * 100}%` as any, backgroundColor: colors.primary }]} />
+            </View>
+            <Text style={[styles.gamifyLabel, { color: colors.mutedForeground }]}>{levelMax - levelProgress} to next</Text>
+          </View>
+          <View style={styles.gamifyDivider} />
+          <View style={styles.gamifyBlock}>
+            <Text style={[styles.gamifyNum, { color: currentStreak >= 7 ? colors.scoreGreen : colors.primary }]}>🔥 {currentStreak}</Text>
+            <Text style={[styles.gamifyLabel, { color: colors.mutedForeground }]}>Best: {highestStreak}</Text>
+          </View>
+        </View>
       </View>
+
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Your Stats</Text>
+        <View style={styles.statsGrid}>
+          {[
+            { label: 'Today\'s Score', value: `${avgScore}`, icon: 'pulse', color: avgScore >= 75 ? colors.scoreGreen : avgScore >= 40 ? colors.scoreYellow : colors.scoreRed },
+            { label: 'Days Tracked', value: `${totalDaysTracked}`, icon: 'calendar', color: colors.primary },
+            { label: 'Journal Entries', value: `${journalEntries.length}`, icon: 'book', color: colors.accent },
+            { label: 'Setbacks', value: `${relapseLogs.length}`, icon: 'refresh', color: colors.scoreYellow },
+          ].map(stat => (
+            <View key={stat.label} style={[styles.statCard, { borderColor: colors.border, borderRadius: colors.radius }]}>
+              <Ionicons name={stat.icon as any} size={20} color={stat.color} />
+              <Text style={[styles.statValue, { color: colors.foreground }]}>{stat.value}</Text>
+              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>{stat.label}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {badges.length > 0 && (
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>✨ Badges ({badges.length}/{BADGES.length})
+          </Text>
+          <View style={styles.badgeGrid}>
+            {badges.map(badgeId => {
+              const badge = BADGES.find(b => b.id === badgeId);
+              if (!badge) return null;
+              return (
+                <View key={badgeId} style={[styles.badgeItem, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '30', borderRadius: 10 }]}>
+                  <Text style={styles.badgeItemEmoji}>{badge.emoji}</Text>
+                  <Text style={[styles.badgeItemName, { color: colors.foreground }]}>{badge.name}</Text>
+                  <Text style={[styles.badgeItemDesc, { color: colors.mutedForeground }]}>{badge.description}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      )}
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
         <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Current Week</Text>
@@ -213,8 +255,8 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  content: { paddingHorizontal: 20, gap: 16 },
-  nameSection: { paddingBottom: 8 },
+  content: { paddingHorizontal: 16, gap: 14 },
+  nameSection: { paddingBottom: 4 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   nameEditRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   nameText: { fontSize: 28, fontFamily: 'Inter_700Bold', letterSpacing: -0.5 },
@@ -226,19 +268,32 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   nameSubtext: { fontSize: 13, fontFamily: 'Inter_400Regular', marginTop: 4 },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  gamifyCard: { borderWidth: 1, padding: 16, gap: 0 },
+  gamifyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  gamifyBlock: { flex: 1, alignItems: 'center', gap: 3 },
+  gamifyNum: { fontSize: 20, fontFamily: 'Inter_700Bold', letterSpacing: -1 },
+  gamifyLabel: { fontSize: 10, fontFamily: 'Inter_500Medium', letterSpacing: 0.5 },
+  gamifyDivider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.08)' },
+  levelBarBg: { height: 5, borderRadius: 3, overflow: 'hidden', width: 80 },
+  levelBarFill: { height: 5, borderRadius: 3 },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   statCard: {
     width: '47%',
-    padding: 14,
+    padding: 12,
     borderWidth: 1,
-    gap: 6,
+    gap: 5,
     alignItems: 'flex-start',
   },
-  statValue: { fontSize: 28, fontFamily: 'Inter_700Bold', letterSpacing: -1 },
-  statLabel: { fontSize: 12, fontFamily: 'Inter_400Regular' },
-  section: { borderWidth: 1, padding: 16, gap: 8 },
+  statValue: { fontSize: 24, fontFamily: 'Inter_700Bold', letterSpacing: -1 },
+  statLabel: { fontSize: 11, fontFamily: 'Inter_400Regular' },
+  section: { borderWidth: 1, padding: 16, gap: 10 },
   sectionTitle: { fontSize: 17, fontFamily: 'Inter_600SemiBold' },
   sectionSubtitle: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: -4 },
+  badgeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  badgeItem: { width: '47%', borderWidth: 1, padding: 12, gap: 3 },
+  badgeItemEmoji: { fontSize: 22 },
+  badgeItemName: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  badgeItemDesc: { fontSize: 11, fontFamily: 'Inter_400Regular', lineHeight: 15 },
   weekSelector: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   weekBtn: {
     width: 40,

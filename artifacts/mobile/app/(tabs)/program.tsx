@@ -62,7 +62,7 @@ function CheckAnimation({ onComplete }: { onComplete: () => void }) {
 export default function ProgramScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { profile, toggleWeekTask, isWeekTaskComplete, updateProfile } = useApp();
+  const { profile, toggleWeekTask, isWeekTaskComplete, updateProfile, totalXP, currentLevel, currentStreak } = useApp();
   const [expandedWeek, setExpandedWeek] = useState<number>(profile.currentWeek);
   const [recentlyChecked, setRecentlyChecked] = useState<string | null>(null);
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
@@ -81,12 +81,7 @@ export default function ProgramScreen() {
     return { earned, total, pct: total > 0 ? earned / total : 0 };
   };
 
-  const totalXP = PROGRAM_WEEKS.reduce((sum, w) => {
-    const { earned } = getWeekXP(w.weekNumber);
-    return sum + earned;
-  }, 0);
   const maxXP = PROGRAM_WEEKS.reduce((sum, w) => sum + w.tasks.length * XP_PER_TASK, 0);
-
   const weeksComplete = PROGRAM_WEEKS.filter((_, i) => getWeekXP(i + 1).pct >= 1).length;
 
   const handleTaskToggle = (weekNum: number, taskId: string) => {
@@ -146,7 +141,7 @@ export default function ProgramScreen() {
             </Text>
           </View>
           <View style={[styles.levelBadge, { backgroundColor: colors.primary }]}>
-            <Text style={styles.levelBadgeText}>LVL {profile.currentWeek}</Text>
+            <Text style={styles.levelBadgeText}>LVL {currentLevel}</Text>
           </View>
         </View>
 
@@ -165,8 +160,8 @@ export default function ProgramScreen() {
           </View>
           <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
           <View style={styles.statItem}>
-            <Text style={[styles.statNum, { color: colors.foreground }]}>{weeksComplete}</Text>
-            <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Weeks Done</Text>
+            <Text style={[styles.statNum, { color: colors.foreground }]}>🔥 {currentStreak}</Text>
+            <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Day Streak</Text>
           </View>
           <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
           <View style={styles.statItem}>

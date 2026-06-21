@@ -23,6 +23,7 @@ export interface DefaultMetric {
   isSensitive: boolean;
   scoreWeight: number;
   emoji?: string;
+  isDefault?: boolean;
 }
 
 export const DEFAULT_METRICS: DefaultMetric[] = [

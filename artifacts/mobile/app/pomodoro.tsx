@@ -23,7 +23,7 @@ const MODES = [
 export default function PomodoroScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { addFocusMinutes } = useApp();
+  const { addFocusMinutes, totalXP, currentLevel } = useApp();
 
   const [modeIndex, setModeIndex] = useState(0);
   const [phase, setPhase] = useState<'work' | 'rest'>('work');
@@ -120,7 +120,9 @@ export default function PomodoroScreen() {
           <Ionicons name="chevron-back" size={26} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>Deep Work</Text>
-        <View style={{ width: 40 }} />
+        <View style={[styles.lvlBadge, { backgroundColor: colors.primary }]}>
+          <Text style={styles.lvlBadgeText}>LVL {currentLevel}</Text>
+        </View>
       </View>
 
       <View style={styles.modeRow}>
@@ -290,6 +292,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   focusText: { fontSize: 14, fontFamily: 'Inter_500Medium' },
+  lvlBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  lvlBadgeText: { fontSize: 11, fontFamily: 'Inter_700Bold', color: '#fff', letterSpacing: 1 },
   tipsContainer: { paddingHorizontal: 24, paddingBottom: 32, gap: 8 },
   tip: { borderLeftWidth: 2, paddingLeft: 12 },
   tipText: { fontSize: 13, fontFamily: 'Inter_400Regular' },
