@@ -32,6 +32,8 @@ export interface JournalEntry {
   response: string;
   mood: number;
   energy: number;
+  tags?: string[];
+  wordCount?: number;
 }
 
 export interface RelapseLog {
@@ -97,7 +99,7 @@ interface AppContextType {
   getLogForDate: (metricId: string, date: string) => DailyLog | undefined;
   getLogsForDate: (date: string) => DailyLog[];
   getLogsForMetric: (metricId: string, days: number) => DailyLog[];
-  addJournalEntry: (entry: Omit<JournalEntry, 'id'>) => Promise<void>;
+  addJournalEntry: (entry: Omit<JournalEntry, 'id' | 'wordCount' | 'tags'>) => Promise<void>;
   getJournalEntryForDate: (date: string) => JournalEntry | undefined;
   addRelapseLog: (log: Omit<RelapseLog, 'id'>) => Promise<void>;
   toggleWeekTask: (weekNumber: number, taskId: string) => Promise<void>;
@@ -105,6 +107,7 @@ interface AppContextType {
   addCustomMetric: (metric: Omit<TrackedMetric, 'id' | 'isDefault' | 'isCustom'>) => Promise<void>;
   focusMinutesToday: number;
   addFocusMinutes: (minutes: number) => Promise<void>;
+  addXP: (amount: number) => void;
   getStreak: () => number;
   getStreakRisk: () => boolean;
   getMissedDays: (days: number) => string[];
@@ -254,7 +257,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const earnXP = useCallback((amount: number, reason: string) => {
+  const addXP = useCallback((amount: number, reason?: string) => {
     setProfile(prev => {
       const next = { ...prev, totalXP: prev.totalXP + amount };
       AsyncStorage.setItem('profile', JSON.stringify(next));
@@ -336,14 +339,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return result;
   }, [dailyLogs]);
 
-  const addJournalEntry = useCallback(async (entry: Omit<JournalEntry, 'id'>) => {
+  const addJournalEntry = useCallback(async (entry: Omit<JournalEntry, 'id' | 'wordCount' | 'tags'>) => {
+    const wordCount = entry.response.trim().split(/\s+/).filter(w => w.length > 0).length;
+    const detectedTags: string[] = [];
+    const text = entry.response.toLowerCase();
+    if (text.includes('stressed') || text.includes('anxious') || text.includes('overwhelm')) detectedTags.push('stress');
+    if (text.includes('tired') || text.includes('sleep') || text.includes('exhaust')) detectedTags.push('sleep');
+    if (text.includes('craving') || text.includes('urge') || text.includes('tempt')) detectedTags.push('craving');
+    if (text.includes('proud') || text.includes('accomplish') || text.includes('achiev')) detectedTags.push('win');
+    if (text.includes('social') || text.includes('friend') || text.includes('family') || text.includes('alone')) detectedTags.push('social');
+    if (text.includes('work') || text.includes('job') || text.includes('career')) detectedTags.push('work');
+    if (text.includes('exercise') || text.includes('workout') || text.includes('gym') || text.includes('run')) detectedTags.push('fitness');
+    if (text.includes('meditat') || text.includes('mindful') || text.includes('breath')) detectedTags.push('mindfulness');
+    const enriched = { ...entry, wordCount, tags: detectedTags };
     setJournalEntries(prev => {
       const existing = prev.findIndex(e => e.date === entry.date);
       let next: JournalEntry[];
       if (existing >= 0) {
-        next = prev.map((e, i) => i === existing ? { ...e, ...entry } : e);
+        next = prev.map((e, i) => i === existing ? { ...e, ...enriched } : e);
       } else {
-        next = [...prev, { id: generateId(), ...entry }];
+        next = [...prev, { id: generateId(), ...enriched }];
       }
       AsyncStorage.setItem('journalEntries', JSON.stringify(next));
       return next;
@@ -485,6 +500,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addCustomMetric,
       focusMinutesToday,
       addFocusMinutes,
+      addXP,
       getStreak,
       getStreakRisk,
       getMissedDays,
