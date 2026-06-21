@@ -1,7 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import Constants from 'expo-constants';
+import { setBaseUrl, customFetch } from '@workspace/api-client-react';
 import { AVAILABLE_PROGRAMS, DEFAULT_METRICS, DefaultMetric, Program, PROGRAM_WEEKS } from '@/constants/program';
-import { updateStreakRiskFromLog } from '@/notifications/manager';
+import { updateStreakRiskFromLog, registerForPushNotificationsAsync } from '@/notifications/manager';
+
+const debuggerHost = Constants.expoConfig?.hostUri;
+const host = debuggerHost ? debuggerHost.split(':')[0] : 'localhost';
+const API_URL = `http://${host}:5001/api`;
+setBaseUrl(API_URL);
 
 export interface UserProfile {
   name: string;
@@ -175,6 +182,7 @@ interface AppContextType {
   getProgramProgress: (programId: string) => ProgramProgress | undefined;
   exportData: () => string;
   deleteAllData: () => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 function xpForLevel(level: number) { return Math.floor(level * level * 100 + level * 50); }
@@ -208,7 +216,10 @@ const DEFAULT_PROFILE: UserProfile = {
 };
 
 function generateId(): string {
-  return Date.now().toString() + Math.random().toString(36).substr(2, 9);
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
 }
 
 function calculateDisciplineScore(
@@ -312,19 +323,19 @@ function computeCorrelationInsights(
     return logs.reduce((s, l) => s + l.value, 0) / logs.length;
   };
 
-  const sleepMetric = metrics.find(m => m.id === 'sleep-time');
-  const wakeMetric = metrics.find(m => m.id === 'wake-time');
-  const moodMetric = metrics.find(m => m.id === 'mood');
-  const productivityMetric = metrics.find(m => m.id === 'productivity');
-  const alcoholMetric = metrics.find(m => m.id === 'alcohol');
-  const cigaretteMetric = metrics.find(m => m.id === 'cigarettes');
+  const sleepMetric = metrics.find(m => m.id === '00000000-0000-4000-8000-000000000006' || m.name === 'Slept on time');
+  const wakeMetric = metrics.find(m => m.id === '00000000-0000-4000-8000-000000000001' || m.name === 'Wake on time');
+  const moodMetric = metrics.find(m => m.id === '00000000-0000-4000-8000-000000000010' || m.name === 'Mood');
+  const productivityMetric = metrics.find(m => m.id === '00000000-0000-4000-8000-000000000011' || m.name === 'Productivity');
+  const alcoholMetric = metrics.find(m => m.id === '00000000-0000-4000-8000-000000000008' || m.name === 'Alcohol');
+  const cigaretteMetric = metrics.find(m => m.id === '00000000-0000-4000-8000-000000000007' || m.name === 'Cigarettes');
 
   if (sleepMetric && moodMetric) {
-    const sleepLogs = dailyLogs.filter(l => l.metricId === 'sleep-time' && l.value >= 0);
+    const sleepLogs = dailyLogs.filter(l => l.metricId === sleepMetric.id && l.value >= 0);
     const goodSleepDates = sleepLogs.filter(l => l.value === 1).map(l => l.date);
     const badSleepDates = sleepLogs.filter(l => l.value === 0).map(l => l.date);
-    const moodGood = getMetricAvgOnDays('mood', goodSleepDates);
-    const moodBad = getMetricAvgOnDays('mood', badSleepDates);
+    const moodGood = getMetricAvgOnDays(moodMetric.id, goodSleepDates);
+    const moodBad = getMetricAvgOnDays(moodMetric.id, badSleepDates);
     if (moodGood !== null && moodBad !== null && goodSleepDates.length >= 3 && badSleepDates.length >= 2) {
       const diff = Math.abs(moodGood - moodBad);
       if (diff >= 1) {
@@ -341,11 +352,11 @@ function computeCorrelationInsights(
   }
 
   if (wakeMetric && productivityMetric) {
-    const wakeLogs = dailyLogs.filter(l => l.metricId === 'wake-time' && l.value >= 0);
+    const wakeLogs = dailyLogs.filter(l => l.metricId === wakeMetric.id && l.value >= 0);
     const onTimeDates = wakeLogs.filter(l => l.value === 1).map(l => l.date);
     const lateDates = wakeLogs.filter(l => l.value === 0).map(l => l.date);
-    const prodOnTime = getMetricAvgOnDays('productivity', onTimeDates);
-    const prodLate = getMetricAvgOnDays('productivity', lateDates);
+    const prodOnTime = getMetricAvgOnDays(productivityMetric.id, onTimeDates);
+    const prodLate = getMetricAvgOnDays(productivityMetric.id, lateDates);
     if (prodOnTime !== null && prodLate !== null && onTimeDates.length >= 3) {
       const diff = prodOnTime - prodLate;
       if (diff >= 0.8) {
@@ -362,7 +373,7 @@ function computeCorrelationInsights(
   }
 
   if (alcoholMetric) {
-    const alcoholLogs = dailyLogs.filter(l => l.metricId === 'alcohol' && l.value >= 0);
+    const alcoholLogs = dailyLogs.filter(l => l.metricId === alcoholMetric.id && l.value >= 0);
     const drinkDays = alcoholLogs.filter(l => l.value > 0).map(l => l.date);
     const soberDays = alcoholLogs.filter(l => l.value === 0).map(l => l.date);
     if (drinkDays.length >= 2 && soberDays.length >= 2) {
@@ -382,7 +393,7 @@ function computeCorrelationInsights(
   }
 
   if (cigaretteMetric) {
-    const cigLogs = dailyLogs.filter(l => l.metricId === 'cigarettes' && l.value >= 0);
+    const cigLogs = dailyLogs.filter(l => l.metricId === cigaretteMetric.id && l.value >= 0);
     if (cigLogs.length >= 7) {
       const firstWeekAvg = cigLogs.slice(0, 7).reduce((s, l) => s + l.value, 0) / 7;
       const lastWeekAvg = cigLogs.slice(-7).reduce((s, l) => s + l.value, 0) / 7;
@@ -444,11 +455,197 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [relapseLogs, setRelapseLogs] = useState<RelapseLog[]>([]);
   const [weekTaskProgress, setWeekTaskProgress] = useState<WeekTaskProgress[]>([]);
   const [focusMinutesToday, setFocusMinutesToday] = useState<number>(0);
+  const [userIdState, setUserIdState] = useState<string | null>(null);
 
   useEffect(() => { loadAll(); }, []);
 
+  // Helper to sync local data to the cloud in the background
+  const syncWithCloud = useCallback(async (
+    userId: string,
+    currentProfile: UserProfile,
+    currentMetrics: TrackedMetric[],
+    currentLogs: DailyLog[],
+    currentJournal: JournalEntry[],
+    currentRelapse: RelapseLog[],
+    currentTasks: WeekTaskProgress[],
+    currentFocus: number
+  ) => {
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const progProgress = Object.keys(currentProfile.programProgress).map(programId => ({
+        programId,
+        currentWeek: currentProfile.programProgress[programId].currentWeek,
+        weekStartDate: currentProfile.programProgress[programId].weekStartDate,
+        completedWeeks: currentProfile.programProgress[programId].completedWeeks,
+        resetCount: currentProfile.programProgress[programId].resetCount,
+      }));
+
+      await customFetch(`/users/${userId}/sync`, {
+        method: 'POST',
+        body: JSON.stringify({
+          profile: {
+            name: currentProfile.name,
+            wakeTime: currentProfile.wakeTime,
+            bedTime: currentProfile.bedTime,
+            startDate: currentProfile.startDate,
+            totalXP: currentProfile.totalXP,
+            highestStreak: currentProfile.highestStreak,
+            onboardingComplete: currentProfile.onboardingComplete || false,
+            activeProgramIds: currentProfile.activeProgramIds,
+          },
+          metrics: currentMetrics.map(m => ({
+            id: m.id,
+            name: m.name,
+            category: m.category,
+            inputType: m.inputType,
+            scoreWeight: m.scoreWeight,
+            isCustom: m.isCustom || false,
+            implementationIntention: m.implementationIntention || null,
+          })),
+          dailyLogs: currentLogs.map(l => ({
+            id: l.id,
+            metricId: l.metricId,
+            date: l.date,
+            value: l.value,
+            note: l.note || null,
+          })),
+          journalEntries: currentJournal.map(j => ({
+            id: j.id,
+            date: j.date,
+            prompt: j.prompt,
+            response: j.response,
+            mood: j.mood,
+            energy: j.energy,
+            tags: j.tags || [],
+            wordCount: j.wordCount || 0,
+          })),
+          relapseLogs: currentRelapse.map(r => ({
+            id: r.id,
+            date: r.date,
+            metricId: r.metricId,
+            triggerCategory: r.triggerCategory,
+            triggerReflection: r.triggerReflection,
+            nextAction: r.nextAction,
+            compassionStatement: r.compassionStatement || null,
+          })),
+          programProgress: progProgress,
+          weekTaskProgress: currentTasks.map(t => ({
+            programId: t.programId || 'eight-week-recovery',
+            weekNumber: t.weekNumber,
+            taskId: t.taskId,
+            completed: t.completed,
+          })),
+          focusLogs: [
+            {
+              id: '00000000-0000-4000-8000-000000000012',
+              date: todayStr,
+              minutes: currentFocus
+            }
+          ]
+        })
+      });
+      console.log('Background cloud sync complete');
+    } catch (err) {
+      console.warn('Cloud sync offline or failed:', err);
+    }
+  }, []);
+
+  const registerAndSync = useCallback(async (currentProfile: UserProfile) => {
+    try {
+      const result = await customFetch<{ userId: string }>('/users/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: currentProfile.name,
+          startDate: currentProfile.startDate,
+          wakeTime: currentProfile.wakeTime,
+          bedTime: currentProfile.bedTime
+        })
+      });
+
+      if (result.userId) {
+        await AsyncStorage.setItem('userId', result.userId);
+        setUserIdState(result.userId);
+        console.log('Registered user device in cloud:', result.userId);
+        
+        // Initial sync of existing local data
+        await syncWithCloud(
+          result.userId,
+          currentProfile,
+          metrics,
+          dailyLogs,
+          journalEntries,
+          relapseLogs,
+          weekTaskProgress,
+          focusMinutesToday
+        );
+
+        // Fetch and save push token
+        const token = await registerForPushNotificationsAsync();
+        if (token) {
+          await customFetch(`/users/${result.userId}/push-token`, {
+            method: 'POST',
+            body: JSON.stringify({ token })
+          }).catch(console.warn);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not register device in cloud:', err);
+    }
+  }, [metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday, syncWithCloud]);
+
   async function loadAll() {
     try {
+      const savedUserId = await AsyncStorage.getItem('userId');
+      if (savedUserId) {
+        setUserIdState(savedUserId);
+        
+        // Pull latest state from cloud on startup to synchronize changes
+        try {
+          const latest = await customFetch<any>(`/users/${savedUserId}/data`);
+          if (latest) {
+            setProfile({ ...DEFAULT_PROFILE, ...latest.profile, badges: latest.profile.badges || [] });
+            setMetrics(latest.metrics);
+            setDailyLogs(latest.dailyLogs);
+            setJournalEntries(latest.journalEntries);
+            setRelapseLogs(latest.relapseLogs);
+            setWeekTaskProgress(latest.weekTaskProgress);
+
+            const todayStr = new Date().toISOString().split('T')[0];
+            const todayFocus = latest.focusLogs.find((fl: any) => fl.date === todayStr);
+            if (todayFocus) {
+              setFocusMinutesToday(todayFocus.minutes);
+              await AsyncStorage.setItem(`focusMinutes_${todayStr}`, String(todayFocus.minutes));
+            }
+
+            const finalProfile = { ...DEFAULT_PROFILE, ...latest.profile, badges: latest.profile.badges || [] };
+            await Promise.all([
+              AsyncStorage.setItem('profile', JSON.stringify(finalProfile)),
+              AsyncStorage.setItem('metrics', JSON.stringify(latest.metrics)),
+              AsyncStorage.setItem('dailyLogs', JSON.stringify(latest.dailyLogs)),
+              AsyncStorage.setItem('journalEntries', JSON.stringify(latest.journalEntries)),
+              AsyncStorage.setItem('relapseLogs', JSON.stringify(latest.relapseLogs)),
+              AsyncStorage.setItem('weekTaskProgress', JSON.stringify(latest.weekTaskProgress))
+            ]);
+            console.log('Synchronized client with database on load');
+
+            // Refresh push token and send to server
+            registerForPushNotificationsAsync().then(token => {
+              if (token) {
+                customFetch(`/users/${savedUserId}/push-token`, {
+                  method: 'POST',
+                  body: JSON.stringify({ token })
+                }).catch(console.warn);
+              }
+            });
+
+            return;
+          }
+        } catch (err) {
+          console.log('Could not fetch cloud data on startup, using local cache:', err);
+        }
+      }
+
+      // Fallback: load strictly from local storage
       const [profileRaw, metricsRaw, logsRaw, journalRaw, relapseRaw, progressRaw, focusRaw] = await Promise.all([
         AsyncStorage.getItem('profile'),
         AsyncStorage.getItem('metrics'),
@@ -487,6 +684,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }
 
+  // Auto-sync debounced state changes to cloud in the background
+  useEffect(() => {
+    if (!userIdState) return;
+
+    const timer = setTimeout(() => {
+      syncWithCloud(userIdState, profile, metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday);
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [userIdState, profile, metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday, syncWithCloud]);
+
   const today = new Date().toISOString().split('T')[0];
   const todayLogs = dailyLogs.filter(l => l.date === today);
   const disciplineScore = calculateDisciplineScore(todayLogs, metrics, focusMinutesToday);
@@ -510,9 +718,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setProfile(prev => {
       const next = { ...prev, ...updates };
       AsyncStorage.setItem('profile', JSON.stringify(next));
+      
+      if (next.onboardingComplete && !userIdState) {
+        registerAndSync(next);
+      }
       return next;
     });
-  }, []);
+  }, [userIdState, registerAndSync]);
 
   const addXP = useCallback((amount: number) => {
     setProfile(prev => {
@@ -853,6 +1065,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setFocusMinutesToday(0);
   }, []);
 
+  const logout = useCallback(async () => {
+    // Clear all session and user data from device storage
+    await AsyncStorage.multiRemove([
+      'userId',
+      'lastSessionName',
+      'lastSessionEmail',
+      'profile',
+      'metrics',
+      'dailyLogs',
+      'journalEntries',
+      'relapseLogs',
+      'weekTaskProgress',
+    ]);
+    // Reset context state
+    setUserIdState(null);
+    setProfile(DEFAULT_PROFILE);
+    setMetrics(DEFAULT_METRICS);
+    setDailyLogs([]);
+    setJournalEntries([]);
+    setRelapseLogs([]);
+    setWeekTaskProgress([]);
+    setFocusMinutesToday(0);
+  }, []);
+
   return (
     <AppContext.Provider value={{
       profile, metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress,
@@ -866,7 +1102,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       focusMinutesToday, addFocusMinutes, addXP, getStreak, getStreakRisk,
       getMissedDays, getRecentActivity, getMetricStreak, getMetricConsistency,
       enrollProgram, unenrollProgram, advanceProgramWeek, restartProgramWeek,
-      getWeekGatingStatus, getProgramProgress, exportData, deleteAllData,
+      getWeekGatingStatus, getProgramProgress, exportData, deleteAllData, logout,
     }}>
       {children}
     </AppContext.Provider>

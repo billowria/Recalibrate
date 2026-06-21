@@ -1,6 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 
 const NOTIF_SETTINGS_KEY = 'notificationSettings';
 
@@ -57,6 +58,39 @@ export async function areNotificationsEnabled(): Promise<boolean> {
   return perm.status === 'granted';
 }
 
+export async function registerForPushNotificationsAsync(): Promise<string | undefined> {
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'default',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#FF231F7C',
+    });
+  }
+
+  const hasPerm = await requestNotificationPermissions();
+  if (!hasPerm) return undefined;
+
+  // We explicitly configure Notifications handler so pushes in foreground show banners
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+
+  try {
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId ?? '9fd10cbb-b359-45e1-b574-48194033942f';
+    const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+    console.log("Expo Push Token:", token);
+    return token;
+  } catch (e) {
+    console.warn("Failed to fetch expo push token", e);
+    return undefined;
+  }
+}
+
 export async function cancelAllNotifications() {
   await Notifications.cancelAllScheduledNotificationsAsync();
 }
@@ -71,9 +105,9 @@ export async function scheduleDailyReminder(
   await Notifications.scheduleNotificationAsync({
     content: { title, body, sound: true },
     trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DAILY,
       hour,
       minute,
-      repeats: true,
     } as any,
     identifier: id,
   });
@@ -91,9 +125,9 @@ export async function scheduleStreakRiskReminder(
       sound: true,
     },
     trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DAILY,
       hour,
       minute,
-      repeats: true,
     } as any,
     identifier: 'streak-risk',
   });
@@ -109,7 +143,11 @@ export async function scheduleImmediateNotification(title: string, body: string)
 export async function scheduleInstant(title: string, body: string) {
   await Notifications.scheduleNotificationAsync({
     content: { title, body, sound: true },
-    trigger: { seconds: 1 } as any,
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+      seconds: 1,
+      repeats: false,
+    } as any,
   });
 }
 
@@ -182,7 +220,11 @@ export async function refreshStreakRiskNotification(streakLength: number, hasLog
         body: 'You haven\'t logged today yet. Tap to protect your streak.',
         sound: true,
       },
-      trigger: { seconds: 3600 } as any,
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: 3600,
+        repeats: false,
+      } as any,
       identifier: 'streak-risk',
     });
   }
@@ -198,7 +240,11 @@ export async function updateStreakRiskFromLog(streakLength: number) {
         body: 'Great job keeping your streak alive. See you tomorrow!',
         sound: true,
       },
-      trigger: { seconds: 1 } as any,
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: 1,
+        repeats: false,
+      } as any,
     });
   }
 }

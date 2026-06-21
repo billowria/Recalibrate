@@ -39,7 +39,7 @@ export interface Program {
 
 export const DEFAULT_METRICS: DefaultMetric[] = [
   {
-    id: 'wake-time',
+    id: '00000000-0000-4000-8000-000000000001',
     name: 'Wake on time',
     category: 'build',
     inputType: 'boolean',
@@ -49,7 +49,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     emoji: '🌅',
   },
   {
-    id: 'make-bed',
+    id: '00000000-0000-4000-8000-000000000002',
     name: 'Made bed',
     category: 'build',
     inputType: 'boolean',
@@ -59,7 +59,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     emoji: '🛏️',
   },
   {
-    id: 'sunlight',
+    id: '00000000-0000-4000-8000-000000000003',
     name: '10 min sunlight',
     category: 'build',
     inputType: 'boolean',
@@ -69,7 +69,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     emoji: '☀️',
   },
   {
-    id: 'water',
+    id: '00000000-0000-4000-8000-000000000004',
     name: 'Water intake',
     category: 'build',
     inputType: 'counter',
@@ -79,7 +79,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     emoji: '💧',
   },
   {
-    id: 'mindfulness',
+    id: '00000000-0000-4000-8000-000000000005',
     name: '10 min mindfulness',
     category: 'build',
     inputType: 'boolean',
@@ -89,7 +89,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     emoji: '🧘',
   },
   {
-    id: 'sleep-time',
+    id: '00000000-0000-4000-8000-000000000006',
     name: 'Slept on time',
     category: 'build',
     inputType: 'boolean',
@@ -99,7 +99,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     emoji: '🌙',
   },
   {
-    id: 'cigarettes',
+    id: '00000000-0000-4000-8000-000000000007',
     name: 'Cigarettes',
     category: 'reduce',
     inputType: 'counter',
@@ -109,7 +109,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     emoji: '🚬',
   },
   {
-    id: 'alcohol',
+    id: '00000000-0000-4000-8000-000000000008',
     name: 'Alcohol',
     category: 'reduce',
     inputType: 'counter',
@@ -119,7 +119,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     emoji: '🍺',
   },
   {
-    id: 'porn',
+    id: '00000000-0000-4000-8000-000000000009',
     name: 'Porn',
     category: 'reduce',
     inputType: 'boolean',
@@ -129,7 +129,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     emoji: '🔞',
   },
   {
-    id: 'mood',
+    id: '00000000-0000-4000-8000-000000000010',
     name: 'Mood',
     category: 'neutral',
     inputType: 'scale',
@@ -139,7 +139,7 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
     emoji: '😊',
   },
   {
-    id: 'productivity',
+    id: '00000000-0000-4000-8000-000000000011',
     name: 'Productivity',
     category: 'neutral',
     inputType: 'scale',

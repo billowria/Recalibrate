@@ -17,6 +17,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, BADGES } from '@/context/AppContext';
 import { useColors } from '@/hooks/useColors';
 import { AVAILABLE_PROGRAMS } from '@/constants/program';
+import { customFetch } from '@workspace/api-client-react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   NotificationSettings,
   getNotificationSettings,
@@ -64,7 +66,7 @@ export default function ProfileScreen() {
     profile, updateProfile, metrics, dailyLogs, journalEntries, relapseLogs,
     disciplineScore, totalXP, currentLevel, currentStreak, highestStreak,
     badges, levelProgress, levelMax, availablePrograms, getProgramProgress,
-    exportData, deleteAllData,
+    exportData, deleteAllData, logout,
   } = useApp();
 
   const [editingName, setEditingName] = useState(false);
@@ -73,11 +75,13 @@ export default function ProfileScreen() {
   const [bedInput, setBedInput] = useState(profile.bedTime);
   const [notifSettings, setNotifSettings] = useState<NotificationSettings | null>(null);
   const [notifPermGranted, setNotifPermGranted] = useState(false);
+  const [userEmail, setUserEmail] = useState('');
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
 
   React.useEffect(() => {
     getNotificationSettings().then(setNotifSettings);
     areNotificationsEnabled().then(setNotifPermGranted);
+    AsyncStorage.getItem('lastSessionEmail').then(e => { if (e) setUserEmail(e); });
   }, []);
 
   const handleToggleNotif = async (key: keyof NotificationSettings) => {
@@ -137,6 +141,17 @@ export default function ProfileScreen() {
     } catch {}
   };
 
+  const handleTestPush = async () => {
+    try {
+      const userId = await AsyncStorage.getItem('userId');
+      if (!userId) return;
+      await customFetch(`/users/${userId}/test-push`, { method: 'POST' });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      Alert.alert('Error', 'Could not send test push');
+    }
+  };
+
   const handleDeleteData = () => {
     Alert.alert(
       'Delete All Data?',
@@ -149,6 +164,25 @@ export default function ProfileScreen() {
           onPress: async () => {
             await deleteAllData();
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Sign Out',
+      'You will be signed out. Your data will remain on this device. You can sign back in anytime.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            await logout();
+            router.replace('/auth');
           },
         },
       ]
@@ -174,11 +208,12 @@ export default function ProfileScreen() {
           <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Your stats & settings</Text>
         </View>
         <TouchableOpacity
-          onPress={() => router.push('/onboarding')}
-          style={[styles.iconBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-          activeOpacity={0.7}
+          onPress={handleLogout}
+          style={[styles.logoutBtn, { backgroundColor: colors.destructive + '12', borderColor: colors.destructive + '30' }]}
+          activeOpacity={0.75}
         >
-          <Ionicons name="settings-outline" size={18} color={colors.mutedForeground} />
+          <Ionicons name="log-out-outline" size={16} color={colors.destructive} />
+          <Text style={[styles.logoutBtnText, { color: colors.destructive }]}>Sign Out</Text>
         </TouchableOpacity>
       </View>
 
@@ -211,6 +246,9 @@ export default function ProfileScreen() {
               <Ionicons name="pencil-outline" size={14} color={colors.mutedForeground} />
             </TouchableOpacity>
           )}
+          {userEmail ? (
+            <Text style={[styles.userEmail, { color: colors.mutedForeground }]}>{userEmail}</Text>
+          ) : null}
           <View style={[styles.levelPill, { backgroundColor: colors.primary }]}>
             <Text style={styles.levelPillText}>LVL {currentLevel}</Text>
           </View>
@@ -364,6 +402,14 @@ export default function ProfileScreen() {
                 </View>
               </TouchableOpacity>
             ))}
+            <TouchableOpacity
+              onPress={handleTestPush}
+              style={[styles.testPushBtn, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '30' }]}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="paper-plane-outline" size={16} color={colors.primary} />
+              <Text style={[styles.testPushText, { color: colors.primary }]}>Send Test Notification</Text>
+            </TouchableOpacity>
           </>
         )}
       </View>
@@ -469,6 +515,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   title: { fontSize: 28, fontFamily: 'Inter_700Bold', letterSpacing: -0.5 },
   subtitle: { fontSize: 13, fontFamily: 'Inter_400Regular', marginTop: 2 },
+  logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
+  logoutBtnText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   iconBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   identityCard: { borderWidth: 1, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 16 },
   avatarWrap: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
@@ -479,6 +527,7 @@ const styles = StyleSheet.create({
   nameInput: { flex: 1, borderWidth: 1.5, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 16, fontFamily: 'Inter_600SemiBold' },
   saveNameBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   identityName: { fontSize: 18, fontFamily: 'Inter_700Bold' },
+  userEmail: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: -2 },
   levelPill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
   levelPillText: { fontSize: 11, fontFamily: 'Inter_700Bold', color: '#fff', letterSpacing: 1 },
   levelBarBg: { height: 4, borderRadius: 2, overflow: 'hidden' },
@@ -537,4 +586,6 @@ const styles = StyleSheet.create({
   notifSubRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
   notifSubLabel: { fontSize: 13, fontFamily: 'Inter_500Medium' },
   notifCheck: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  testPushBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderWidth: 1, borderRadius: 8, marginTop: 8 },
+  testPushText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
 });

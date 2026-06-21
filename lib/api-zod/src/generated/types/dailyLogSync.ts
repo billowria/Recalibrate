@@ -6,6 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface HealthStatus {
-  status: string;
+export interface DailyLogSync {
+  id: string;
+  metricId: string;
+  date: string;
+  value: number;
+  note?: string | null;
 }

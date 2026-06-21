@@ -1,6 +1,5 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
   description: API specification
@@ -10,6 +9,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: users
+    description: User and sync operations
 paths:
   /healthz:
     get:
@@ -24,6 +25,137 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /users/register:
+    post:
+      operationId: registerUser
+      tags: [users]
+      summary: Register user
+      description: Registers a new user device and seeds default metrics.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterResponse"
+
+  /users/login:
+    post:
+      operationId: loginUser
+      tags: [users]
+      summary: Login user
+      description: Authenticates a user and returns their profile and session userId.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Logged in successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Invalid credentials
+
+  /users/{userId}/data:
+    get:
+      operationId: getUserData
+      tags: [users]
+      summary: Get all user data
+      description: Fetches the entire synchronized state for a user.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDataResponse"
+
+  /users/{userId}/sync:
+    post:
+      operationId: syncUserData
+      tags: [users]
+      summary: Sync user data
+      description: Upserts offline-logged changes from the client to the database.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncRequest"
+      responses:
+        "200":
+          description: Synced successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncResponse"
+
+  /users/{userId}/push-token:
+    post:
+      operationId: updatePushToken
+      tags: [users]
+      summary: Update Expo Push Token
+      description: Stores the device's push token to enable remote push notifications.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushTokenRequest"
+      responses:
+        "200":
+          description: Token updated successfully
+
+  /users/{userId}/test-push:
+    post:
+      operationId: testPushNotification
+      tags: [users]
+      summary: Test Push Notification
+      description: Sends an immediate push notification to the user's stored token for testing.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Push sent successfully
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +166,354 @@ components:
       required:
         - status
 
+    RegisterRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+        startDate:
+          type: string
+        wakeTime:
+          type: string
+        bedTime:
+          type: string
+      required:
+        - name
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required:
+        - email
+        - password
+
+    LoginResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        onboardingComplete:
+          type: boolean
+        profile:
+          $ref: "#/components/schemas/UserProfileSync"
+      required:
+        - userId
+        - onboardingComplete
+        - profile
+
+    RegisterResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        profile:
+          $ref: "#/components/schemas/UserProfileSync"
+        metrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetricSync"
+      required:
+        - userId
+        - profile
+        - metrics
+
+    UserProfileSync:
+      type: object
+      properties:
+        name:
+          type: string
+        wakeTime:
+          type: string
+        bedTime:
+          type: string
+        startDate:
+          type: string
+        totalXP:
+          type: integer
+        highestStreak:
+          type: integer
+        onboardingComplete:
+          type: boolean
+        activeProgramIds:
+          type: array
+          items:
+            type: string
+      required:
+        - name
+        - wakeTime
+        - bedTime
+        - startDate
+        - totalXP
+        - highestStreak
+        - onboardingComplete
+        - activeProgramIds
+
+    MetricSync:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        category:
+          type: string
+        inputType:
+          type: string
+        scoreWeight:
+          type: integer
+        isCustom:
+          type: boolean
+        implementationIntention:
+          type: string
+          nullable: true
+      required:
+        - id
+        - name
+        - category
+        - inputType
+        - scoreWeight
+
+    DailyLogSync:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        metricId:
+          type: string
+          format: uuid
+        date:
+          type: string
+        value:
+          type: number
+        note:
+          type: string
+          nullable: true
+      required:
+        - id
+        - metricId
+        - date
+        - value
+
+    JournalEntrySync:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        date:
+          type: string
+        prompt:
+          type: string
+        response:
+          type: string
+        mood:
+          type: integer
+        energy:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
+        wordCount:
+          type: integer
+      required:
+        - id
+        - date
+        - prompt
+        - response
+        - mood
+        - energy
+
+    RelapseLogSync:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        date:
+          type: string
+        metricId:
+          type: string
+          format: uuid
+        triggerCategory:
+          type: string
+        triggerReflection:
+          type: string
+        nextAction:
+          type: string
+        compassionStatement:
+          type: string
+          nullable: true
+      required:
+        - id
+        - date
+        - metricId
+        - triggerCategory
+        - triggerReflection
+        - nextAction
+
+    ProgramProgressSync:
+      type: object
+      properties:
+        programId:
+          type: string
+        currentWeek:
+          type: integer
+        weekStartDate:
+          type: string
+        completedWeeks:
+          type: array
+          items:
+            type: integer
+        resetCount:
+          type: integer
+      required:
+        - programId
+        - currentWeek
+        - weekStartDate
+        - completedWeeks
+        - resetCount
+
+    WeekTaskProgressSync:
+      type: object
+      properties:
+        programId:
+          type: string
+        weekNumber:
+          type: integer
+        taskId:
+          type: string
+        completed:
+          type: boolean
+      required:
+        - programId
+        - weekNumber
+        - taskId
+        - completed
+
+    FocusLogSync:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        date:
+          type: string
+        minutes:
+          type: integer
+      required:
+        - id
+        - date
+        - minutes
+
+    UserDataResponse:
+      type: object
+      properties:
+        profile:
+          $ref: "#/components/schemas/UserProfileSync"
+        metrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetricSync"
+        dailyLogs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyLogSync"
+        journalEntries:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalEntrySync"
+        relapseLogs:
+          type: array
+          items:
+            $ref: "#/components/schemas/RelapseLogSync"
+        programProgress:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProgramProgressSync"
+        weekTaskProgress:
+          type: array
+          items:
+            $ref: "#/components/schemas/WeekTaskProgressSync"
+        focusLogs:
+          type: array
+          items:
+            $ref: "#/components/schemas/FocusLogSync"
+      required:
+        - profile
+        - metrics
+        - dailyLogs
+        - journalEntries
+        - relapseLogs
+        - programProgress
+        - weekTaskProgress
+        - focusLogs
+
+    SyncRequest:
+      type: object
+      properties:
+        profile:
+          $ref: "#/components/schemas/UserProfileSync"
+        metrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetricSync"
+        dailyLogs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyLogSync"
+        journalEntries:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalEntrySync"
+        relapseLogs:
+          type: array
+          items:
+            $ref: "#/components/schemas/RelapseLogSync"
+        programProgress:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProgramProgressSync"
+        weekTaskProgress:
+          type: array
+          items:
+            $ref: "#/components/schemas/WeekTaskProgressSync"
+        focusLogs:
+          type: array
+          items:
+            $ref: "#/components/schemas/FocusLogSync"
+
+    SyncResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        syncedAt:
+          type: string
+          format: date-time
+      required:
+        - success
+        - syncedAt
+
+    PushTokenRequest:
+      type: object
+      properties:
+        token:
+          type: string
+      required:
+        - token
