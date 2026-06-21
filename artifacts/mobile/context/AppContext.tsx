@@ -671,6 +671,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       AsyncStorage.setItem('metrics', JSON.stringify(next));
       return next;
     });
+    setDailyLogs(prev => {
+      const next = prev.filter(l => l.metricId !== metricId);
+      AsyncStorage.setItem('dailyLogs', JSON.stringify(next));
+      return next;
+    });
   }, []);
 
   const addFocusMinutes = useCallback(async (minutes: number) => {

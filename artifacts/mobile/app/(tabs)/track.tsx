@@ -196,7 +196,7 @@ function MetricCard({ metric, colors, today }: {
   colors: any;
   today: string;
 }) {
-  const { logMetric, getLogForDate, getLogsForMetric, getMetricStreak, getMetricConsistency } = useApp();
+  const { logMetric, getLogForDate, getLogsForMetric, getMetricStreak, getMetricConsistency, deleteMetric } = useApp();
   const [expanded, setExpanded] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [noteSaved, setNoteSaved] = useState(false);
@@ -275,6 +275,30 @@ function MetricCard({ metric, colors, today }: {
             <Ionicons name="alert" size={12} color="#fff" />
           </View>
         )}
+        <TouchableOpacity
+          onPress={() => {
+            Alert.alert(
+              'Delete Tracker?',
+              `Remove "${metric.name}" and all its history? This cannot be undone.`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: () => {
+                    deleteMetric(metric.id);
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                  },
+                },
+              ],
+              { cancelable: true }
+            );
+          }}
+          style={mcStyles.deleteBtn}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="trash-outline" size={14} color="#ef4444" />
+        </TouchableOpacity>
       </View>
 
       <View style={mcStyles.logRow}>
@@ -361,6 +385,7 @@ const mcStyles = StyleSheet.create({
   streakNum: { fontSize: 11, fontFamily: 'Inter_700Bold' },
   sparkline: { fontSize: 12, fontFamily: 'Inter_400Regular', letterSpacing: 1 },
   doneDot: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  deleteBtn: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   logRow: { paddingHorizontal: 14, paddingBottom: 12 },
   expandBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, paddingHorizontal: 14, paddingVertical: 8 },
   expandBtnLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
