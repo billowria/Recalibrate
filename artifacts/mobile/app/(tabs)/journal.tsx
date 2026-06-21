@@ -1,4 +1,5 @@
 import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Platform,
@@ -65,7 +66,17 @@ export default function JournalScreen() {
         borderBottomColor: colors.border,
         backgroundColor: colors.background,
       }]}>
-        <Text style={[styles.title, { color: colors.foreground }]}>Journal</Text>
+        <View style={styles.titleRow}>
+          <Text style={[styles.title, { color: colors.foreground }]}>Journal</Text>
+          <TouchableOpacity
+            onPress={() => router.push('/calendar')}
+            style={[styles.calBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+            <Text style={[styles.calBtnText, { color: colors.primary }]}>Calendar</Text>
+          </TouchableOpacity>
+        </View>
         <View style={[styles.tabRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
           {(['today', 'history'] as const).map(tab => (
             <TouchableOpacity
@@ -251,7 +262,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     gap: 12,
   },
+  titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   title: { fontSize: 28, fontFamily: 'Inter_700Bold', letterSpacing: -0.5 },
+  calBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
+  calBtnText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   tabRow: {
     flexDirection: 'row',
     borderWidth: 1,
