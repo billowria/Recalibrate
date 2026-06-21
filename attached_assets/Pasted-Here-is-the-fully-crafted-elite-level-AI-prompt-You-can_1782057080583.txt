@@ -1,0 +1,109 @@
+Here is the fully crafted, elite-level AI prompt. You can copy and paste this directly into an AI coding assistant (like Cursor, Claude 3.5 Sonnet, or GPT-4o) to start building your app. 
+
+This prompt acts as the ultimate blueprint, combining behavioral psychology, modern UI/UX standards, and robust software architecture. It ensures the 8-week plan is structured but completely configurable for the user.
+
+***
+
+**Copy everything below this line:**
+
+---
+
+# AI Build Prompt — "Discipline OS" Mobile App (MVP)
+
+Act as an elite Mobile App Architect, UX/UI Designer, and Behavioral Psychologist. Your task is to architect and generate the foundational code, database schema, and UI/UX blueprint for a mobile application called "Discipline OS". 
+
+This app is an evidence-based behavior change system designed to help users overcome addictions (smoking, alcohol, porn), build discipline, and improve mental/physical health. The MVP revolves around a highly configurable 8-Week Recovery & Discipline Protocol.
+
+## 1. CORE PHILOSOPHY & PSYCHOLOGY
+Ground every feature in behavioral science, not motivational hype. The app's tone is clinical, supportive, and structured.
+- **Self-Monitoring:** The act of tracking changes behavior. The tracking engine must be frictionless.
+- **Environment > Motivation:** Behavior follows context. The app tracks environmental tasks (e.g., "remove triggers") as strictly as physical tasks.
+- **Identity-Based Habits:** Users sustain behaviors that align with their self-image. (Week 5 focus).
+- **Never Miss Twice:** A missed day is data, not a failure. Relapse triggers a "Reset & Recover" protocol, never a punitive red screen.
+- **No Shame-Based Copy:** Market this as a "structured behavior-change system." Missed days are "missed," not "failed."
+
+## 2. TECH STACK (Mobile-First)
+- **Framework:** React Native with Expo (TypeScript).
+- **Styling:** Tailwind CSS (NativeWind).
+- **Database:** SQLite (local-first via WatermelonDB or Expo SQLite) for offline support and privacy, with a Prisma schema defined for future Postgres sync.
+- **State Management:** Zustand.
+- **Charts:** Victory Native or Recharts.
+- **Animations:** React Native Reanimated (smooth, tactile micro-interactions, haptic feedback).
+
+## 3. UI/UX DESIGN SYSTEM
+- **Aesthetic:** Modern, minimalist, Apple-quality UI. Dark mode by default (OLED black).
+- **Visual Language:** Glassmorphism cards, subtle drop shadows, high contrast for accessibility. 
+- **Friction Engineering:** Logging a good habit takes 1 tap (low friction). Logging a relapse requires a 3-second breathe/reflect screen before logging (high friction, mindful).
+- **Navigation:** Bottom tab bar (Dashboard, Program, Track, Journal, Profile).
+
+## 4. CONFIGURABLE DATA MODELS (The Core Engine)
+The 8-Week plan is not hardcoded; it is seed data in a configurable engine. Users must be able to add custom habits to their daily non-negotiables.
+
+Define the Prisma/SQLite schema for the following:
+- `User`: Auth, current_week, target_wake_time, target_bedtime, discipline_score.
+- `Program`: The 8-Week Protocol (seeded).
+- `ProgramWeek`: week_number, theme, goal_text, psychology_rationale.
+- `DailyTask`: program_week_id, title, type (checkbox | metric_link), is_persistent (for daily non-negotiables).
+- `TrackedMetric`: user_id, name, category (build | reduce | neutral), input_type (boolean | counter | scale_1_10), unit_label, is_sensitive.
+- `DailyLog`: user_id, metric_id, date, value, note.
+- `JournalEntry`: date, prompt, response, mood (1-10), energy (1-10).
+- `RelapseLog`: date, metric_id, trigger_reflection, next_action.
+
+## 5. THE 8-WEEK RECOVERY & DISCIPLINE PROTOCOL (SEED DATA)
+Ship this as the default program. 
+
+**Persistent Daily Non-Negotiables (Configurable):**
+- Wake up at same time (±30 min)
+- Make bed
+- 10 min sunlight exposure
+- 2L+ water
+- 10 min mindfulness
+- Sleep before target bedtime
+- *Addiction Tracking:* Cigarettes (counter), Alcohol units (counter), Porn (boolean), Masturbation (boolean)
+- *Mental Tracking:* Mood (1-10), Productivity (1-10)
+
+**The 8-Week Curriculum:**
+- **Week 1: Awareness & Stabilization.** Goal: Baseline data collection. No reduction targets. Just log honestly. (Psychology: Self-monitoring).
+- **Week 2: Environmental Reset.** Goal: Make bad habits harder. Tasks: Remove alcohol from home, install website blockers, phone outside bedroom. Add positive friction (clothes by bed). (Psychology: Environment > Motivation).
+- **Week 3: Physical Recovery.** Goal: Rebuild energy. Tasks: Gym 3x/week (Workout A: Squats/Pushups/Row; Workout B: Deadlift/Press/Pullups), 8000+ steps. (Psychology: Exercise improves executive function).
+- **Week 4: Dopamine Reset.** Goal: Reduce artificial stimulation. Reduce smoking 20-30%, alcohol 50%, social media 50%. Replace with reading/walking. (Psychology: Alternative rewarding activities).
+- **Week 5: Identity Rebuilding.** Goal: Align actions with identity. Daily statement: "I am becoming a disciplined man." Track: "Did I act like a disciplined person today? Yes/No". (Psychology: Identity-based habits).
+- **Week 6: Deep Work Training.** Goal: Increase focus. Tasks: 2x Pomodoro sessions (25/5) daily. Build to 90-min blocks. (Psychology: Attention is trainable).
+- **Week 7: Social Recovery.** Goal: Reduce isolation. Tasks: Call parents twice, meet one friend, join one community. (Psychology: Social ties predict long-term recovery).
+- **Week 8: Life Direction.** Goal: Future pacing. Tasks: Write Health, Career, Relationship, and Discipline visions. Convert to 90-day and 1-year goals.
+
+## 6. FEATURE MODULES & LOGIC
+
+### A. Daily Dashboard (Home)
+- **Discipline Score Engine (0-100):** Real-time score calculated from: Sleep, Exercise, Focus minutes, Habit completion, and Addiction metrics. Color-coded (Red < 40, Yellow 40-75, Green > 75). 
+- **Daily Check-in Card:** Glassmorphic UI showing today's non-negotiables with tap-to-complete haptic circles.
+- **Weekly Progress Ring:** Visual indicator of current week's task completion.
+
+### B. Dynamic Tracker System ("My Trackers")
+- Users can add/configure any metric. 
+- Preset categories: Health, Addictions, Mental, Productivity, Relationships.
+- Graphs: Daily, weekly, monthly trends.
+
+### C. 8-Week Program Hub
+- Timeline view of the 8 weeks. Current week expanded.
+- Check-off capability for weekly tasks (e.g., "Remove alcohol from home").
+- Users can add custom daily tasks to their non-negotiables list.
+
+### D. Emergency Recovery Mode (Relapse Protocol)
+- If a user logs a relapse (e.g., porn, heavy drinking, or misses 2 days of core habits):
+- UI shifts to a calming, non-judgmental blue/grey screen.
+- Prompts a 5-minute CBT exercise: "What was the trigger?", "Where were you?", "What will you do differently right now?"
+- Automatically resets the daily streak but *keeps historical data*. Emphasizes "Never miss twice."
+
+### E. Deep Work & Mindfulness Module
+- Built-in Pomodoro timer (25/5, 50/10, 90/15).
+- Logs focus minutes to the Discipline Score automatically.
+
+## 7. OUTPUT REQUIREMENTS
+Please provide the following:
+1. **App Architecture:** Folder structure for a React Native/Expo project using TypeScript and Tailwind.
+2. **Database Schema:** Complete Prisma schema covering the entities in Section 4.
+3. **Discipline Score Algorithm:** The mathematical logic/TypeScript function to calculate the 0-100 score based on weighted variables.
+4. **UI Component Blueprint:** React Native/Tailwind code for the **Daily Dashboard** featuring the Discipline Score ring and Configurable Habit Check-list (using glassmorphism and dark mode).
+5. **Emergency Recovery Mode Logic:** State management code (Zustand) showing how the app transitions to Relapse Protocol when a user logs an addiction metric.
+6. **8-Week Program State:** TypeScript interfaces for the 8-week curriculum and how user progress is tracked.
