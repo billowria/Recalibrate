@@ -15,6 +15,7 @@ export const users = pgTable("users", {
   highestStreak: integer("highest_streak").default(0),
   onboardingComplete: boolean("onboarding_complete").default(false),
   activeProgramIds: jsonb("active_program_ids").$type<string[]>().default([]),
+  savedProgramIds: jsonb("saved_program_ids").$type<string[]>().default([]),
   expoPushToken: text("expo_push_token"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -51,8 +52,11 @@ export const journalEntries = pgTable("journal_entries", {
   date: text("date").notNull(),
   prompt: text("prompt").notNull(),
   response: text("response").notNull(),
-  mood: integer("mood").notNull(),
-  energy: integer("energy").notNull(),
+  mood: integer("mood"),
+  energy: integer("energy"),
+  freeResponse: text("free_response"),
+  isWeeklyReflection: boolean("is_weekly_reflection").default(false).notNull(),
+  programContext: jsonb("program_context").$type<{ missedTaskIds?: string[]; hitTaskIds?: string[]; programId?: string }>(),
   tags: jsonb("tags").$type<string[]>().default([]),
   wordCount: integer("word_count").default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -103,6 +107,45 @@ export const focusLogs = pgTable("focus_logs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Programs
+export const programs = pgTable("programs", {
+  id: text("id").primaryKey(), // We use text because of slugs like "eight-week-recovery"
+  title: text("title").notNull(),
+  emoji: text("emoji").notNull(),
+  description: text("description").notNull(),
+  totalWeeks: integer("total_weeks").notNull(),
+  isSystem: boolean("is_system").default(true).notNull(),
+  color: text("color").notNull(),
+  authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
+  isPublished: boolean("is_published").default(false).notNull(),
+  forkedFromId: text("forked_from_id"),
+});
+
+// Program Weeks
+export const programWeeks = pgTable("program_weeks", {
+  id: text("id").primaryKey(),
+  programId: text("program_id").references(() => programs.id, { onDelete: "cascade" }).notNull(),
+  weekNumber: integer("week_number").notNull(),
+  theme: text("theme").notNull(),
+  goal: text("goal").notNull(),
+  psychologyRationale: text("psychology_rationale").notNull(),
+  dailyJournalPrompt: text("daily_journal_prompt"),
+  weeklyReflectionPrompt: text("weekly_reflection_prompt"),
+});
+
+// Program Tasks
+export const programTasks = pgTable("program_tasks", {
+  id: text("id").primaryKey(),
+  weekId: text("week_id").references(() => programWeeks.id, { onDelete: "cascade" }).notNull(),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  isHabit: boolean("is_habit").default(false).notNull(),
+  metricCategory: text("metric_category"), // 'build' or 'reduce'
+  metricInputType: text("metric_input_type"), // 'boolean', 'counter', 'scale'
+  metricUnitLabel: text("metric_unit_label"),
+  metricScoreWeight: integer("metric_score_weight"),
+});
+
 // Zod Schemas
 export const insertUserSchema = createInsertSchema(users);
 export const selectUserSchema = createSelectSchema(users);
@@ -127,3 +170,12 @@ export const selectWeekTaskProgressSchema = createSelectSchema(weekTaskProgress)
 
 export const insertFocusLogSchema = createInsertSchema(focusLogs);
 export const selectFocusLogSchema = createSelectSchema(focusLogs);
+
+export const insertProgramSchema = createInsertSchema(programs);
+export const selectProgramSchema = createSelectSchema(programs);
+
+export const insertProgramWeekSchema = createInsertSchema(programWeeks);
+export const selectProgramWeekSchema = createSelectSchema(programWeeks);
+
+export const insertProgramTaskSchema = createInsertSchema(programTasks);
+export const selectProgramTaskSchema = createSelectSchema(programTasks);

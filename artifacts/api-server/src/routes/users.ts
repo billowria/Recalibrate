@@ -12,7 +12,7 @@ import {
   weekTaskProgress,
   focusLogs
 } from "@workspace/db";
-import { RegisterUserBody, SyncUserDataBody, LoginUserBody, PushTokenRequestBody } from "@workspace/api-zod";
+import { RegisterUserBody, SyncUserDataBody, LoginUserBody, UpdatePushTokenBody } from "@workspace/api-zod";
 import { Expo } from "expo-server-sdk";
 
 const expo = new Expo();
@@ -81,7 +81,8 @@ router.post("/users/register", async (req, res, next) => {
         totalXP: 0,
         highestStreak: 0,
         onboardingComplete: false,
-        activeProgramIds: ["eight-week-recovery"]
+        activeProgramIds: ["dopamine-detox-protocol"],
+        savedProgramIds: ["dopamine-detox-protocol"]
       });
 
       // 2. Seed default metrics
@@ -99,7 +100,7 @@ router.post("/users/register", async (req, res, next) => {
       // 3. Initialize default program progress
       await tx.insert(programProgress).values({
         userId,
-        programId: "eight-week-recovery",
+        programId: "dopamine-detox-protocol",
         currentWeek: 1,
         weekStartDate: today,
         completedWeeks: [],
@@ -169,7 +170,8 @@ router.post("/users/login", async (req, res, next) => {
         totalXP: userRecord.totalXP || 0,
         highestStreak: userRecord.highestStreak || 0,
         onboardingComplete: userRecord.onboardingComplete || false,
-        activeProgramIds: userRecord.activeProgramIds || []
+        activeProgramIds: userRecord.activeProgramIds || [],
+        savedProgramIds: userRecord.savedProgramIds || []
       }
     });
   } catch (error) {
@@ -218,7 +220,8 @@ router.get("/users/:userId/data", async (req, res, next) => {
         totalXP: profileRecord.totalXP || 0,
         highestStreak: profileRecord.highestStreak || 0,
         onboardingComplete: profileRecord.onboardingComplete || false,
-        activeProgramIds: profileRecord.activeProgramIds || []
+        activeProgramIds: profileRecord.activeProgramIds || [],
+        savedProgramIds: profileRecord.savedProgramIds || []
       },
       metrics: dbMetrics.map((m) => ({
         id: m.id,
@@ -241,8 +244,11 @@ router.get("/users/:userId/data", async (req, res, next) => {
         date: j.date,
         prompt: j.prompt,
         response: j.response,
-        mood: j.mood,
-        energy: j.energy,
+        mood: j.mood ?? null,
+        energy: j.energy ?? null,
+        freeResponse: j.freeResponse ?? null,
+        isWeeklyReflection: j.isWeeklyReflection ?? false,
+        programContext: (j.programContext as any) ?? null,
         tags: j.tags || [],
         wordCount: j.wordCount || 0
       })),
@@ -306,7 +312,8 @@ router.post("/users/:userId/sync", async (req, res, next) => {
           totalXP: body.profile.totalXP,
           highestStreak: body.profile.highestStreak,
           onboardingComplete: body.profile.onboardingComplete,
-          activeProgramIds: body.profile.activeProgramIds
+          activeProgramIds: body.profile.activeProgramIds,
+          savedProgramIds: body.profile.savedProgramIds
         }).onConflictDoUpdate({
           target: users.id,
           set: {
@@ -318,6 +325,7 @@ router.post("/users/:userId/sync", async (req, res, next) => {
             highestStreak: body.profile.highestStreak,
             onboardingComplete: body.profile.onboardingComplete,
             activeProgramIds: body.profile.activeProgramIds,
+            savedProgramIds: body.profile.savedProgramIds,
             updatedAt: new Date()
           }
         });
@@ -378,8 +386,11 @@ router.post("/users/:userId/sync", async (req, res, next) => {
             date: j.date,
             prompt: j.prompt,
             response: j.response,
-            mood: j.mood,
-            energy: j.energy,
+            mood: j.mood ?? null,
+            energy: j.energy ?? null,
+            freeResponse: j.freeResponse ?? null,
+            isWeeklyReflection: j.isWeeklyReflection ?? false,
+            programContext: j.programContext ?? null,
             tags: j.tags || [],
             wordCount: j.wordCount || 0
           }).onConflictDoUpdate({
@@ -387,8 +398,11 @@ router.post("/users/:userId/sync", async (req, res, next) => {
             set: {
               prompt: j.prompt,
               response: j.response,
-              mood: j.mood,
-              energy: j.energy,
+              mood: j.mood ?? null,
+              energy: j.energy ?? null,
+              freeResponse: j.freeResponse ?? null,
+              isWeeklyReflection: j.isWeeklyReflection ?? false,
+              programContext: j.programContext ?? null,
               tags: j.tags || [],
               wordCount: j.wordCount || 0
             }
@@ -485,7 +499,7 @@ router.post("/users/:userId/sync", async (req, res, next) => {
 router.post("/users/:userId/push-token", async (req, res, next) => {
   try {
     const { userId } = req.params;
-    const body = PushTokenRequestBody.parse(req.body);
+    const body = UpdatePushTokenBody.parse(req.body);
 
     await db.update(users).set({
       expoPushToken: body.token

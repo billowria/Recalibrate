@@ -1,94 +1,225 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
-import { useColors } from '@/hooks/useColors';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import Svg, { Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
+import { BRAND, FONT, SCORE_COLORS } from '@/constants/colors';
 
-interface Props {
-  score: number;
+interface DisciplineScoreRingProps {
+  score: number;         // 0-100
   size?: number;
+  strokeWidth?: number;
+  showLabel?: boolean;
+  showContext?: boolean;
+  contextText?: string;
+  animated?: boolean;
+  isVisible?: boolean;
+  triggerKey?: number;
 }
 
-export function DisciplineScoreRing({ score, size = 180 }: Props) {
-  const colors = useColors();
-  const [displayScore, setDisplayScore] = useState(0);
-  const scaleAnim = useRef(new Animated.Value(0.9)).current;
+function getScoreGradientColors(score: number): [string, string] {
+  if (score >= 80) return [SCORE_COLORS.excellent, '#4DE8FF'];
+  if (score >= 60) return ['#4DE8FF', BRAND.primary];
+  if (score >= 40) return [SCORE_COLORS.building, '#FF8C42'];
+  return ['#6B7280', '#4B5563'];
+}
+
+function getScoreLabel(score: number): string {
+  if (score >= 90) return 'Exceptional';
+  if (score >= 80) return 'Strong';
+  if (score >= 70) return 'Good';
+  if (score >= 60) return 'Building';
+  if (score >= 40) return 'Starting';
+  if (score >= 20) return 'Warming Up';
+  return 'Day Zero';
+}
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
+export function DisciplineScoreRing({
+  score,
+  size = 200,
+  strokeWidth = 14,
+  showLabel = true,
+  showContext = true,
+  contextText,
+  animated = true,
+  isVisible = true,
+  triggerKey = 0,
+}: DisciplineScoreRingProps) {
+  const safeScore = Math.max(0, Math.min(100, Math.round(score)));
+  const [gradStart, gradEnd] = getScoreGradientColors(safeScore);
+
+  const center = size / 2;
+  const radius = center - strokeWidth / 2 - 4;
+  const circumference = 2 * Math.PI * radius;
+
+  // Animation value for score progress
+  const progressAnim = useRef(new Animated.Value(0)).current;
+  const glowAnim = useRef(new Animated.Value(0.6)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const scoreAnim = useRef(new Animated.Value(0)).current;
+
+  const [displayScore, setDisplayScore] = React.useState(0);
 
   useEffect(() => {
-    Animated.spring(scaleAnim, {
-      toValue: 1,
-      tension: 60,
-      friction: 8,
+    if (!animated) {
+      progressAnim.setValue(safeScore);
+      scoreAnim.setValue(safeScore);
+      setDisplayScore(safeScore);
+      return;
+    }
+
+    if (!isVisible) {
+      progressAnim.setValue(0);
+      scoreAnim.setValue(0);
+      setDisplayScore(0);
+      return;
+    }
+
+    // Reset to 0 when triggerKey changes or visibility transitions
+    progressAnim.setValue(0);
+    scoreAnim.setValue(0);
+    setDisplayScore(0);
+
+    // Animate progress ring
+    Animated.timing(progressAnim, {
+      toValue: safeScore,
+      duration: 1400,
+      delay: 50,
+      easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
 
-    let current = 0;
-    const step = Math.ceil(score / 30);
-    const timer = setInterval(() => {
-      current = Math.min(current + step, score);
-      setDisplayScore(current);
-      if (current >= score) clearInterval(timer);
-    }, 30);
-    return () => clearInterval(timer);
-  }, [score]);
+    // Count up the number display
+    const listener = progressAnim.addListener(({ value }) => {
+      setDisplayScore(Math.round(value));
+    });
 
-  const scoreColor =
-    score >= 75 ? colors.scoreGreen :
-    score >= 40 ? colors.scoreYellow :
-    colors.scoreRed;
+    // Ambient glow pulse
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, { toValue: 1, duration: 2200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 0.5, duration: 2200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ])
+    ).start();
 
-  const label =
-    score >= 75 ? 'ON TRACK' :
-    score >= 40 ? 'BUILDING' :
-    'NEEDS WORK';
+    // Subtle scale pulse for ring
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.01, duration: 3000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 3000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ])
+    ).start();
 
-  const thickness = size * 0.055;
-  const innerSize = size - thickness * 2;
+    return () => {
+      progressAnim.removeListener(listener);
+      glowAnim.stopAnimation();
+      pulseAnim.stopAnimation();
+    };
+  }, [safeScore, animated, isVisible, triggerKey]);
+
+  const strokeDashoffset = progressAnim.interpolate({
+    inputRange: [0, 100],
+    outputRange: [circumference, circumference * (1 - safeScore / 100)],
+    extrapolate: 'clamp',
+  });
+
+  const glowOpacity = glowAnim.interpolate({
+    inputRange: [0.5, 1],
+    outputRange: [0.15, 0.35],
+  });
+
+  const trackOpacity = 0.1;
+  const gradId = `scoreGrad_${size}`;
 
   return (
-    <View style={styles.container}>
-      <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-        <View style={[styles.ring, {
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          borderWidth: thickness,
-          borderColor: scoreColor,
-          backgroundColor: colors.background,
-        }]}>
-          <View style={[styles.inner, {
-            width: innerSize,
-            height: innerSize,
-            borderRadius: innerSize / 2,
-            backgroundColor: colors.card,
-            borderWidth: 1,
-            borderColor: colors.border,
-          }]}>
-            <Text style={[styles.scoreNumber, {
-              fontSize: size * 0.28,
-              color: scoreColor,
-            }]}>
-              {displayScore}
-            </Text>
-            <Text style={[styles.scoreLabel, { color: scoreColor, fontSize: size * 0.079 }]}>
-              {label}
-            </Text>
-            <Text style={[styles.scoreSubLabel, { color: colors.mutedForeground, fontSize: size * 0.068 }]}>
-              DISCIPLINE
-            </Text>
-          </View>
-        </View>
+    <View style={[styles.container, { width: size, height: size }]}>
+      {/* Ambient glow behind ring */}
+      <Animated.View
+        style={[
+          styles.ambientGlow,
+          {
+            width: size * 0.8,
+            height: size * 0.8,
+            borderRadius: (size * 0.8) / 2,
+            backgroundColor: gradStart,
+            opacity: glowOpacity,
+          },
+        ]}
+      />
+
+      {/* SVG Ring */}
+      <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+        <Svg width={size} height={size}>
+          <Defs>
+            <LinearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor={gradStart} stopOpacity="1" />
+              <Stop offset="100%" stopColor={gradEnd} stopOpacity="1" />
+            </LinearGradient>
+          </Defs>
+
+          {/* Track (background ring) */}
+          <Circle
+            cx={center}
+            cy={center}
+            r={radius}
+            fill="none"
+            stroke="#1C1C2E"
+            strokeWidth={strokeWidth}
+            strokeOpacity={trackOpacity + 0.2}
+          />
+
+          {/* Secondary decorative ring */}
+          <Circle
+            cx={center}
+            cy={center}
+            r={radius - strokeWidth - 4}
+            fill="none"
+            stroke={gradStart}
+            strokeWidth={1}
+            strokeOpacity={0.15}
+            strokeDasharray="4 6"
+          />
+
+          {/* Progress arc */}
+          <AnimatedCircle
+            cx={center}
+            cy={center}
+            r={radius}
+            fill="none"
+            stroke={`url(#${gradId})`}
+            strokeWidth={strokeWidth}
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            transform={`rotate(-90, ${center}, ${center})`}
+          />
+
+          {/* Dot at progress end */}
+          {safeScore > 2 && (
+            <Circle
+              cx={center}
+              cy={strokeWidth / 2 + 4}
+              r={strokeWidth / 2.5}
+              fill={gradEnd}
+              transform={`rotate(${(safeScore / 100) * 360 - 90}, ${center}, ${center})`}
+            />
+          )}
+        </Svg>
       </Animated.View>
 
-      <View style={styles.segmentRow}>
-        {[
-          { color: colors.scoreRed, label: '< 40' },
-          { color: colors.scoreYellow, label: '40–75' },
-          { color: colors.scoreGreen, label: '> 75' },
-        ].map((seg) => (
-          <View key={seg.label} style={styles.segment}>
-            <View style={[styles.segDot, { backgroundColor: seg.color }]} />
-            <Text style={[styles.segLabel, { color: colors.mutedForeground }]}>{seg.label}</Text>
-          </View>
-        ))}
+      {/* Center content */}
+      <View style={styles.centerContent} pointerEvents="none">
+        <Text style={[styles.scoreNumber, { color: gradStart }]}>
+          {displayScore}
+        </Text>
+        {showLabel && (
+          <Text style={styles.scoreLabel}>{getScoreLabel(displayScore)}</Text>
+        )}
+        {showContext && (
+          <Text style={styles.contextText}>
+            {contextText || 'Discipline Score'}
+          </Text>
+        )}
       </View>
     </View>
   );
@@ -97,48 +228,38 @@ export function DisciplineScoreRing({ score, size = 180 }: Props) {
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
-    gap: 16,
+    justifyContent: 'center',
+    position: 'relative',
   },
-  ring: {
+  ambientGlow: {
+    position: 'absolute',
+    top: '10%',
+    left: '10%',
+  },
+  centerContent: {
+    position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  inner: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
   },
   scoreNumber: {
-    fontFamily: 'Inter_700Bold',
-    fontWeight: '700',
+    fontFamily: FONT.family.bold,
+    fontSize: 52,
     letterSpacing: -2,
+    lineHeight: 56,
   },
   scoreLabel: {
-    fontFamily: 'Inter_700Bold',
-    letterSpacing: 2,
-    fontWeight: '700',
+    fontFamily: FONT.family.semiBold,
+    fontSize: FONT.size.sm,
+    color: '#A0A0CC',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    marginTop: 2,
   },
-  scoreSubLabel: {
-    fontFamily: 'Inter_500Medium',
-    letterSpacing: 2,
-  },
-  segmentRow: {
-    flexDirection: 'row',
-    gap: 20,
-  },
-  segment: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  segDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  segLabel: {
-    fontSize: 11,
-    fontFamily: 'Inter_500Medium',
+  contextText: {
+    fontFamily: FONT.family.regular,
+    fontSize: FONT.size.xs,
+    color: '#606080',
     letterSpacing: 0.5,
+    marginTop: 4,
   },
 });

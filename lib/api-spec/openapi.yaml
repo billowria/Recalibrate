@@ -251,6 +251,10 @@ components:
           type: array
           items:
             type: string
+        savedProgramIds:
+          type: array
+          items:
+            type: string
       required:
         - name
         - wakeTime
@@ -260,6 +264,7 @@ components:
         - highestStreak
         - onboardingComplete
         - activeProgramIds
+        - savedProgramIds
 
     MetricSync:
       type: object
@@ -323,8 +328,29 @@ components:
           type: string
         mood:
           type: integer
+          nullable: true
         energy:
           type: integer
+          nullable: true
+        freeResponse:
+          type: string
+          nullable: true
+        isWeeklyReflection:
+          type: boolean
+        programContext:
+          type: object
+          nullable: true
+          properties:
+            missedTaskIds:
+              type: array
+              items:
+                type: string
+            hitTaskIds:
+              type: array
+              items:
+                type: string
+            programId:
+              type: string
         tags:
           type: array
           items:
@@ -336,8 +362,6 @@ components:
         - date
         - prompt
         - response
-        - mood
-        - energy
 
     RelapseLogSync:
       type: object

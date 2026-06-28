@@ -4,6 +4,8 @@ export interface ProgramWeek {
   goal: string;
   psychologyRationale: string;
   tasks: WeekTask[];
+  dailyJournalPrompt?: string;
+  weeklyReflectionPrompt?: string;
 }
 
 export interface WeekTask {
@@ -12,6 +14,11 @@ export interface WeekTask {
   description: string;
   type: 'action' | 'reduction' | 'reflection';
   isPersistent: boolean;
+  isHabit?: boolean;
+  metricCategory?: 'build' | 'reduce' | 'neutral';
+  metricInputType?: 'boolean' | 'counter' | 'scale';
+  metricScoreWeight?: number;
+  metricUnitLabel?: string;
 }
 
 export interface DefaultMetric {
@@ -35,6 +42,10 @@ export interface Program {
   isSystem: boolean;
   weeks: ProgramWeek[];
   color: string;
+  isPublished?: boolean;
+  authorId?: string;
+  forkedFromId?: string;
+  imageUrl?: string;
 }
 
 export const DEFAULT_METRICS: DefaultMetric[] = [
@@ -150,180 +161,87 @@ export const DEFAULT_METRICS: DefaultMetric[] = [
   },
 ];
 
-const EIGHT_WEEK_RECOVERY: ProgramWeek[] = [
+export const DOPAMINE_DETOX_WEEKS: ProgramWeek[] = [
   {
     weekNumber: 1,
-    theme: 'Awareness & Stabilization',
-    goal: 'Collect baseline data. No reduction targets — just log honestly.',
-    psychologyRationale: 'Self-monitoring: The act of tracking changes behavior before any intervention begins.',
+    theme: "Mindful Baseline",
+    goal: "Log honest focus levels and establish a screen time boundary.",
+    psychologyRationale: "Self-monitoring: Heightening awareness of distraction triggers is the critical first step in behavior change.",
     tasks: [
-      { id: 'w1-t1', title: 'Log every metric daily', description: 'No judgment. Data only.', type: 'reflection', isPersistent: true },
-      { id: 'w1-t2', title: 'Set your wake time target', description: 'Pick a consistent time you can maintain.', type: 'action', isPersistent: false },
-      { id: 'w1-t3', title: 'Set your sleep time target', description: 'Work backwards from wake time (7-9 hrs).', type: 'action', isPersistent: false },
-      { id: 'w1-t4', title: 'Write your baseline journal', description: 'Where are you honestly right now?', type: 'reflection', isPersistent: false },
-    ],
+      { id: "dd-w1-t1", title: "Screen time under 2 hours", description: "Limit phone usage to build resistance to quick dopamine hits.", type: "reduction", isPersistent: true, isHabit: true, metricCategory: "reduce", metricInputType: "counter", metricUnitLabel: "hours", metricScoreWeight: 10 },
+      { id: "dd-w1-t2", title: "Unbroken focus work", description: "Complete at least 30 minutes of deep, distraction-free work.", type: "action", isPersistent: true, isHabit: true, metricCategory: "build", metricInputType: "boolean", metricScoreWeight: 8 },
+      { id: "dd-w1-t3", title: "Morning anchor walk", description: "Walk outdoors for 15 minutes immediately after waking to reset circadian rhythm.", type: "action", isPersistent: true, isHabit: true, metricCategory: "build", metricInputType: "boolean", metricScoreWeight: 6 }
+    ]
   },
   {
     weekNumber: 2,
-    theme: 'Environmental Reset',
-    goal: 'Make bad habits harder. Make good habits easier.',
-    psychologyRationale: 'Environment > Motivation: Behavior follows context, not willpower.',
+    theme: "Friction & Fasting",
+    goal: "Add physical barriers to distractions and extend deep work.",
+    psychologyRationale: "Environmental design: Restructuring your physical space reduces the cognitive load of resisting temptation.",
     tasks: [
-      { id: 'w2-t1', title: 'Remove alcohol from home', description: 'Physical removal reduces friction to abstain.', type: 'action', isPersistent: false },
-      { id: 'w2-t2', title: 'Install website blockers', description: 'Cold Turkey or Freedom app — set restrictions.', type: 'action', isPersistent: false },
-      { id: 'w2-t3', title: 'Phone outside bedroom', description: 'Charge it in another room tonight.', type: 'action', isPersistent: false },
-      { id: 'w2-t4', title: 'Lay gym clothes the night before', description: 'Reduce morning decision friction.', type: 'action', isPersistent: true },
-    ],
+      { id: "dd-w2-t1", title: "App blockers active", description: "Keep distraction blocking apps active during designated focus hours.", type: "action", isPersistent: true, isHabit: true, metricCategory: "build", metricInputType: "boolean", metricScoreWeight: 8 },
+      { id: "dd-w2-t2", title: "No screens after 10 PM", description: "Wind down without blue light stimulation to protect sleep quality.", type: "action", isPersistent: true, isHabit: true, metricCategory: "build", metricInputType: "boolean", metricScoreWeight: 8 },
+      { id: "dd-w2-t3", title: "Deep work (2x Pomodoros)", description: "Log two 25-minute Pomodoro sessions today.", type: "action", isPersistent: true, isHabit: true, metricCategory: "build", metricInputType: "counter", metricUnitLabel: "sessions", metricScoreWeight: 7 }
+    ]
   },
   {
     weekNumber: 3,
-    theme: 'Physical Recovery',
-    goal: 'Rebuild energy and executive function through movement.',
-    psychologyRationale: 'Exercise improves prefrontal cortex function — the seat of impulse control.',
+    theme: "Physical Anchor",
+    goal: "Restore natural dopamine sensitivity through movement and light.",
+    psychologyRationale: "BDNF priming: Aerobic exercise and light exposure promote prefrontal cortex recovery and impulse control.",
     tasks: [
-      { id: 'w3-t1', title: 'Gym 3x this week (Workout A)', description: 'Squats 3x8, Pushups 3x10, Bent Row 3x8', type: 'action', isPersistent: true },
-      { id: 'w3-t2', title: 'Gym 3x this week (Workout B)', description: 'Deadlift 3x5, Press 3x8, Pullups 3x max', type: 'action', isPersistent: true },
-      { id: 'w3-t3', title: '8,000+ steps daily', description: 'Track via phone or wearable.', type: 'action', isPersistent: true },
-      { id: 'w3-t4', title: 'Cold shower after gym', description: 'Builds stress tolerance and mental clarity.', type: 'action', isPersistent: false },
-    ],
+      { id: "dd-w3-t1", title: "Get morning sunlight", description: "10 minutes of direct outdoor light to anchor sleep cycles.", type: "action", isPersistent: true, isHabit: true, metricCategory: "build", metricInputType: "boolean", metricScoreWeight: 6 },
+      { id: "dd-w3-t2", title: "Strength or Cardio training", description: "30+ minutes of physical training.", type: "action", isPersistent: true, isHabit: true, metricCategory: "build", metricInputType: "boolean", metricScoreWeight: 10 },
+      { id: "dd-w3-t3", title: "No caffeine after 12 PM", description: "Restrict stimulant intake to restore natural baseline energy.", type: "reduction", isPersistent: true, isHabit: true, metricCategory: "reduce", metricInputType: "boolean", metricScoreWeight: 5 }
+    ]
   },
   {
     weekNumber: 4,
-    theme: 'Dopamine Reset',
-    goal: 'Reduce artificial stimulation. Replace with natural rewards.',
-    psychologyRationale: 'Dopamine baseline must recover before self-control improves.',
+    theme: "The Focused Identity",
+    goal: "Sustain focus behaviors by embedding them into your identity.",
+    psychologyRationale: "Identity alignment: We are far more likely to maintain habits that align with our core self-concept.",
     tasks: [
-      { id: 'w4-t1', title: 'Reduce smoking by 20-30%', description: 'Use tracked daily count to hit target.', type: 'reduction', isPersistent: false },
-      { id: 'w4-t2', title: 'Reduce alcohol by 50%', description: 'Track units — half last week\'s total.', type: 'reduction', isPersistent: false },
-      { id: 'w4-t3', title: 'Social media < 30 min/day', description: 'Use screen time settings to enforce this.', type: 'reduction', isPersistent: true },
-      { id: 'w4-t4', title: 'Replace with reading or walking', description: '20 min reading before bed instead of scrolling.', type: 'action', isPersistent: true },
-    ],
-  },
-  {
-    weekNumber: 5,
-    theme: 'Identity Rebuilding',
-    goal: 'Align actions with who you are becoming.',
-    psychologyRationale: 'Identity-based habits: We sustain behaviors that align with our self-image.',
-    tasks: [
-      { id: 'w5-t1', title: 'Write your identity statement', description: '"I am becoming a disciplined person."', type: 'reflection', isPersistent: false },
-      { id: 'w5-t2', title: 'Daily identity check-in', description: '"Did I act like a disciplined person today?"', type: 'reflection', isPersistent: true },
-      { id: 'w5-t3', title: 'Identify 3 identity-aligned actions', description: 'What does your future self do that you can do today?', type: 'reflection', isPersistent: false },
-      { id: 'w5-t4', title: 'Remove one identity-misaligned habit', description: 'One thing your future self would not do.', type: 'reduction', isPersistent: false },
-    ],
-  },
-  {
-    weekNumber: 6,
-    theme: 'Deep Work Training',
-    goal: 'Build the capacity for focused, distraction-free work.',
-    psychologyRationale: 'Attention is trainable. Flow states require deliberate practice.',
-    tasks: [
-      { id: 'w6-t1', title: '2x Pomodoro sessions daily', description: '25-min work / 5-min break. Use built-in timer.', type: 'action', isPersistent: true },
-      { id: 'w6-t2', title: 'Phone off during work sessions', description: 'Full airplane mode or in another room.', type: 'action', isPersistent: true },
-      { id: 'w6-t3', title: 'Build to 90-min focus block', description: 'By end of week: one unbroken 90-min session.', type: 'action', isPersistent: false },
-      { id: 'w6-t4', title: 'Daily shutdown ritual', description: 'Write tomorrow\'s 3 priorities before stopping work.', type: 'action', isPersistent: true },
-    ],
-  },
-  {
-    weekNumber: 7,
-    theme: 'Social Recovery',
-    goal: 'Rebuild meaningful human connection.',
-    psychologyRationale: 'Social bonds are the single strongest predictor of long-term recovery.',
-    tasks: [
-      { id: 'w7-t1', title: 'Call family twice this week', description: 'Not text — voice or video call.', type: 'action', isPersistent: false },
-      { id: 'w7-t2', title: 'Meet one friend in person', description: 'Plan it now. Set the date.', type: 'action', isPersistent: false },
-      { id: 'w7-t3', title: 'Join one community or group', description: 'Gym class, running club, hobby group.', type: 'action', isPersistent: false },
-      { id: 'w7-t4', title: 'Do one thing for someone else', description: 'Service restores a sense of self-worth.', type: 'action', isPersistent: false },
-    ],
-  },
-  {
-    weekNumber: 8,
-    theme: 'Life Direction',
-    goal: 'Build a compelling future worth disciplining yourself for.',
-    psychologyRationale: 'Future pacing: behavior changes when the future becomes emotionally real.',
-    tasks: [
-      { id: 'w8-t1', title: 'Write your Health vision', description: 'Who is the healthiest version of you in 1 year?', type: 'reflection', isPersistent: false },
-      { id: 'w8-t2', title: 'Write your Career vision', description: 'What does your disciplined future self achieve?', type: 'reflection', isPersistent: false },
-      { id: 'w8-t3', title: 'Write your Relationship vision', description: 'What do your relationships look and feel like?', type: 'reflection', isPersistent: false },
-      { id: 'w8-t4', title: 'Convert visions to 90-day goals', description: 'What are 3 concrete actions in the next 90 days?', type: 'reflection', isPersistent: false },
-    ],
-  },
-];
-
-const MORNING_MASTERY_WEEKS: ProgramWeek[] = [
-  {
-    weekNumber: 1,
-    theme: 'The 5AM Blueprint',
-    goal: 'Lock in your wake time and build the morning anchor.',
-    psychologyRationale: 'Cortisol peaks within 30 min of waking — front-loading discipline wins the whole day.',
-    tasks: [
-      { id: 'mm-w1-t1', title: 'Wake at your chosen time 5/7 days', description: 'No snooze. Phone across the room.', type: 'action', isPersistent: true },
-      { id: 'mm-w1-t2', title: 'Get sunlight within 30 min of waking', description: '10 min outside — no sunglasses.', type: 'action', isPersistent: true },
-      { id: 'mm-w1-t3', title: 'No phone for first 30 minutes', description: 'Protect your cortisol window.', type: 'reduction', isPersistent: true },
-      { id: 'mm-w1-t4', title: 'Log your wake time every morning', description: 'Track the data. Watch the pattern.', type: 'reflection', isPersistent: true },
-    ],
-  },
-  {
-    weekNumber: 2,
-    theme: 'Mind Before Screens',
-    goal: 'Own your cognition before external inputs take over.',
-    psychologyRationale: 'First stimuli of the day sets the cognitive frame — protect it.',
-    tasks: [
-      { id: 'mm-w2-t1', title: '10 min journaling before any screen', description: 'Brain dump, gratitude, or 3 priorities.', type: 'reflection', isPersistent: true },
-      { id: 'mm-w2-t2', title: '5 min cold water face splash or cold shower', description: 'Activates alertness fast.', type: 'action', isPersistent: true },
-      { id: 'mm-w2-t3', title: 'Write 3 MIT (Most Important Tasks)', description: 'Before breakfast, know your 3 non-negotiables.', type: 'reflection', isPersistent: true },
-      { id: 'mm-w2-t4', title: 'No social media before 9am', description: 'Build the habit of delaying reactive mode.', type: 'reduction', isPersistent: true },
-    ],
-  },
-  {
-    weekNumber: 3,
-    theme: 'Body Activation',
-    goal: 'Move first — prime the nervous system for the day.',
-    psychologyRationale: 'Morning exercise elevates BDNF — brain-derived growth factor — for 4-6 hours post-workout.',
-    tasks: [
-      { id: 'mm-w3-t1', title: 'Morning movement 5/7 days', description: 'Walk, run, gym, yoga — minimum 20 min.', type: 'action', isPersistent: true },
-      { id: 'mm-w3-t2', title: 'Hydrate immediately on waking', description: '500ml water before coffee.', type: 'action', isPersistent: true },
-      { id: 'mm-w3-t3', title: 'No caffeine before 9:30am', description: 'Let adenosine clear first.', type: 'reduction', isPersistent: true },
-      { id: 'mm-w3-t4', title: 'Rate your morning energy 1-10 each day', description: 'Track what makes it higher or lower.', type: 'reflection', isPersistent: true },
-    ],
-  },
-  {
-    weekNumber: 4,
-    theme: 'The Locked Routine',
-    goal: 'Systematize the whole morning into one automatic stack.',
-    psychologyRationale: 'Habits stack on each other — chaining reduces decision fatigue to near-zero.',
-    tasks: [
-      { id: 'mm-w4-t1', title: 'Write your full morning protocol', description: 'Time-blocked, step by step.', type: 'reflection', isPersistent: false },
-      { id: 'mm-w4-t2', title: 'Execute full protocol 6/7 days', description: 'Every step, every day.', type: 'action', isPersistent: true },
-      { id: 'mm-w4-t3', title: 'Prepare the night before', description: 'Clothes, gym bag, journal — ready before bed.', type: 'action', isPersistent: true },
-      { id: 'mm-w4-t4', title: 'Assess: what still breaks your mornings?', description: 'Write it in journal. Fix it for Week 5.', type: 'reflection', isPersistent: false },
-    ],
-  },
+      { id: "dd-w4-t1", title: "Plan tomorrow's 3 MITs", description: "Write down your 3 Most Important Tasks before going to bed.", type: "action", isPersistent: true, isHabit: true, metricCategory: "build", metricInputType: "boolean", metricScoreWeight: 6 },
+      { id: "dd-w4-t2", title: "No scrolling before 9 AM", description: "Delay your first digital dopamine spike until work begins.", type: "reduction", isPersistent: true, isHabit: true, metricCategory: "reduce", metricInputType: "boolean", metricScoreWeight: 8 },
+      { id: "dd-w4-t3", title: "Deep focus session (90 min)", description: "Complete one unbroken 90-minute deep work block.", type: "action", isPersistent: true, isHabit: true, metricCategory: "build", metricInputType: "boolean", metricScoreWeight: 10 }
+    ]
+  }
 ];
 
 export const AVAILABLE_PROGRAMS: Program[] = [
   {
-    id: 'eight-week-recovery',
-    title: '8-Week Recovery Protocol',
-    emoji: '🧭',
-    description: 'Science-backed behavioral reset: quit or reduce harmful habits, rebuild physical health, and install an identity that makes discipline inevitable.',
-    totalWeeks: 8,
-    isSystem: true,
-    color: '#6366f1',
-    weeks: EIGHT_WEEK_RECOVERY,
-  },
-  {
-    id: 'morning-mastery',
-    title: 'Morning Mastery (4 Weeks)',
-    emoji: '🌅',
-    description: 'Build an unbreakable morning routine that primes your mind, body, and focus before the world gets a chance to derail you.',
+    id: 'dopamine-detox-protocol',
+    title: 'Dopamine Detox & Focus Protocol',
+    emoji: '⚡',
+    description: 'A 4-week structured reset to eliminate digital distractions, rebuild your cognitive focus, and restore baseline mental clarity.',
     totalWeeks: 4,
     isSystem: true,
-    color: '#f59e0b',
-    weeks: MORNING_MASTERY_WEEKS,
+    color: '#8b5cf6',
+    weeks: DOPAMINE_DETOX_WEEKS,
+    imageUrl: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?q=80&w=2574&auto=format&fit=crop', // A beautiful dark/focus themed image
   },
 ];
 
-export const PROGRAM_WEEKS = EIGHT_WEEK_RECOVERY;
+export const PROGRAM_IMAGES = [
+  'https://images.unsplash.com/photo-1498050108023-c5249f4df085?q=80&w=2574&auto=format&fit=crop', // Dopamine/Focus (Clean Desk Workspace)
+  'https://images.unsplash.com/photo-1506126613408-eca07ce68773?q=80&w=2574&auto=format&fit=crop', // Mindfulness/Zen (Mountain Meditation)
+  'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?q=80&w=2574&auto=format&fit=crop', // Gym/Discipline (Fitness Weightlifting)
+  'https://images.unsplash.com/photo-1505691938895-1758d7feb511?q=80&w=2574&auto=format&fit=crop', // Recovery/Sleep (Night Window/Cozy Bed)
+  'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?q=80&w=2574&auto=format&fit=crop', // Deep Work/Study (Library Desk & Lamp)
+  'https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?q=80&w=2574&auto=format&fit=crop', // Habit/Routine (Planner Notebook)
+];
+
+export function getProgramImage(programId: string): string {
+  if (!programId) return PROGRAM_IMAGES[0];
+  let hash = 0;
+  for (let i = 0; i < programId.length; i++) {
+    hash = programId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % PROGRAM_IMAGES.length;
+  return PROGRAM_IMAGES[index];
+}
+
+export const PROGRAM_WEEKS = DOPAMINE_DETOX_WEEKS;
 
 export const DAILY_JOURNAL_PROMPTS: Record<number, string[]> = {
   1: [

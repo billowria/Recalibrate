@@ -55,7 +55,8 @@ export const LoginUserResponse = zod.object({
   "totalXP": zod.number(),
   "highestStreak": zod.number(),
   "onboardingComplete": zod.boolean(),
-  "activeProgramIds": zod.array(zod.string())
+  "activeProgramIds": zod.array(zod.string()),
+  "savedProgramIds": zod.array(zod.string())
 })
 })
 
@@ -77,7 +78,8 @@ export const GetUserDataResponse = zod.object({
   "totalXP": zod.number(),
   "highestStreak": zod.number(),
   "onboardingComplete": zod.boolean(),
-  "activeProgramIds": zod.array(zod.string())
+  "activeProgramIds": zod.array(zod.string()),
+  "savedProgramIds": zod.array(zod.string())
 }),
   "metrics": zod.array(zod.object({
   "id": zod.string().uuid(),
@@ -100,8 +102,15 @@ export const GetUserDataResponse = zod.object({
   "date": zod.string(),
   "prompt": zod.string(),
   "response": zod.string(),
-  "mood": zod.number(),
-  "energy": zod.number(),
+  "mood": zod.number().nullish(),
+  "energy": zod.number().nullish(),
+  "freeResponse": zod.string().nullish(),
+  "isWeeklyReflection": zod.boolean().optional(),
+  "programContext": zod.object({
+  "missedTaskIds": zod.array(zod.string()).optional(),
+  "hitTaskIds": zod.array(zod.string()).optional(),
+  "programId": zod.string().optional()
+}).nullish(),
   "tags": zod.array(zod.string()).optional(),
   "wordCount": zod.number().optional()
 })),
@@ -152,7 +161,8 @@ export const SyncUserDataBody = zod.object({
   "totalXP": zod.number(),
   "highestStreak": zod.number(),
   "onboardingComplete": zod.boolean(),
-  "activeProgramIds": zod.array(zod.string())
+  "activeProgramIds": zod.array(zod.string()),
+  "savedProgramIds": zod.array(zod.string())
 }).optional(),
   "metrics": zod.array(zod.object({
   "id": zod.string().uuid(),
@@ -175,8 +185,15 @@ export const SyncUserDataBody = zod.object({
   "date": zod.string(),
   "prompt": zod.string(),
   "response": zod.string(),
-  "mood": zod.number(),
-  "energy": zod.number(),
+  "mood": zod.number().nullish(),
+  "energy": zod.number().nullish(),
+  "freeResponse": zod.string().nullish(),
+  "isWeeklyReflection": zod.boolean().optional(),
+  "programContext": zod.object({
+  "missedTaskIds": zod.array(zod.string()).optional(),
+  "hitTaskIds": zod.array(zod.string()).optional(),
+  "programId": zod.string().optional()
+}).nullish(),
   "tags": zod.array(zod.string()).optional(),
   "wordCount": zod.number().optional()
 })).optional(),

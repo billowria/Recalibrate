@@ -80,6 +80,30 @@ function RootLayoutNav() {
           animation: "slide_from_right",
         }}
       />
+      <Stack.Screen
+        name="program-builder"
+        options={{
+          headerShown: false,
+          presentation: "card",
+          animation: "slide_from_right",
+        }}
+      />
+      <Stack.Screen
+        name="program-discover"
+        options={{
+          headerShown: false,
+          presentation: "card",
+          animation: "slide_from_right",
+        }}
+      />
+      <Stack.Screen
+        name="coach"
+        options={{
+          headerShown: false,
+          presentation: "card",
+          animation: "slide_from_right",
+        }}
+      />
     </Stack>
   );
 }

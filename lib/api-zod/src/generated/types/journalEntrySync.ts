@@ -5,14 +5,18 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { JournalEntrySyncProgramContext } from './journalEntrySyncProgramContext';
 
 export interface JournalEntrySync {
   id: string;
   date: string;
   prompt: string;
   response: string;
-  mood: number;
-  energy: number;
+  mood?: number | null;
+  energy?: number | null;
+  freeResponse?: string | null;
+  isWeeklyReflection?: boolean;
+  programContext?: JournalEntrySyncProgramContext;
   tags?: string[];
   wordCount?: number;
 }

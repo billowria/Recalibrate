@@ -16,6 +16,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/context/AppContext';
 import { useColors } from '@/hooks/useColors';
+import { LinearGradient } from 'expo-linear-gradient';
+import { GlassCard } from '@/components/GlassCard';
+import { CommitmentButton } from '@/components/CommitmentButton';
+import AnimatedReanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  FadeIn,
+  FadeOut,
+} from 'react-native-reanimated';
 
 const CALM_STEPS = [
   { label: 'Breathe in', duration: 4000 },
@@ -71,6 +82,10 @@ export default function RelapseScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const phaseAnim = useRef(new Animated.Value(0)).current;
 
+  // Reanimated scales for buttons
+  const reflectBtnScale = useSharedValue(1);
+  const nextBtnScale = useSharedValue(1);
+
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -92,7 +107,7 @@ export default function RelapseScreen() {
     const step = CALM_STEPS[breathStep % CALM_STEPS.length];
     setBreathTimer(Math.floor(step.duration / 1000));
     if (breathStep % 3 === 0) {
-      Animated.timing(scaleAnim, { toValue: 1.45, duration: step.duration, useNativeDriver: true }).start();
+      Animated.timing(scaleAnim, { toValue: 1.35, duration: step.duration, useNativeDriver: true }).start();
     } else if (breathStep % 3 === 2) {
       Animated.timing(scaleAnim, { toValue: 1, duration: step.duration, useNativeDriver: true }).start();
     }
@@ -124,41 +139,49 @@ export default function RelapseScreen() {
   };
 
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
-  const bgColor = '#060D1F';
-  const accentBlue = '#3B82F6';
-  const softBlue = '#93C5FD';
-  const cardBg = '#0D1829';
-
   const canSubmit = !!selectedMetricId && !!triggerCategory && !!(customNextAction.trim() || selectedNextAction);
 
   return (
-    <Animated.View style={[styles.root, { backgroundColor: bgColor, opacity: fadeAnim }]}>
+    <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
+      {/* Calm gradient background */}
+      <LinearGradient
+        colors={colors.gradients.calm}
+        style={StyleSheet.absoluteFillObject}
+      />
+
       <TouchableOpacity onPress={() => router.back()} style={[styles.closeBtn, { top: topPadding + 8 }]} activeOpacity={0.7}>
-        <Ionicons name="close" size={24} color={softBlue + '80'} />
+        <Ionicons name="close" size={24} color={colors.textSecondary} />
       </TouchableOpacity>
 
       {/* ─── BREATHE ─── */}
       {phase === 'breathe' && (
         <View style={styles.centeredContainer}>
-          <Text style={[styles.bigTitle, { color: softBlue }]}>Pause for a moment</Text>
-          <Text style={[styles.subtitle, { color: softBlue + 'AA' }]}>
+          <Text style={[styles.bigTitle, { color: colors.text }]}>Pause for a moment</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
             A setback is data. Not a verdict on who you are.
           </Text>
+          
           <View style={styles.breatheRing}>
-            <Animated.View style={[styles.breatheOuter, { borderColor: accentBlue + '35', transform: [{ scale: scaleAnim }] }]}>
-              <View style={[styles.breatheInner, { borderColor: accentBlue }]}>
-                <Text style={[styles.breatheStep, { color: softBlue }]}>
+            <Animated.View style={[styles.breatheOuter, { borderColor: colors.brand.calm + '35', transform: [{ scale: scaleAnim }] }]}>
+              {/* Inner glowing circle */}
+              <LinearGradient
+                colors={colors.gradients.calmAccent}
+                style={[StyleSheet.absoluteFillObject, { borderRadius: 999, opacity: 0.15 }]}
+              />
+              <View style={[styles.breatheInner, { borderColor: colors.brand.calm }]}>
+                <Text style={[styles.breatheStep, { color: colors.text }]}>
                   {CALM_STEPS[breathStep % CALM_STEPS.length].label}
                 </Text>
                 <Text style={[styles.breatheTimer, { color: '#fff' }]}>{breathTimer}</Text>
               </View>
             </Animated.View>
           </View>
-          <Text style={[styles.breatheHint, { color: softBlue + '60' }]}>
+          
+          <Text style={[styles.breatheHint, { color: colors.textMuted }]}>
             Cycle {Math.floor(breathStep / 3) + 1} of 2
           </Text>
           <TouchableOpacity onPress={() => goToPhase('compassion')} style={styles.skipBtn} activeOpacity={0.7}>
-            <Text style={[styles.skipText, { color: softBlue + '60' }]}>Skip breathing →</Text>
+            <Text style={[styles.skipText, { color: colors.brand.calm }]}>Skip breathing →</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -166,21 +189,35 @@ export default function RelapseScreen() {
       {/* ─── COMPASSION ─── */}
       {phase === 'compassion' && (
         <Animated.View style={[styles.centeredContainer, { opacity: phaseAnim }]}>
-          <View style={[styles.compassionCard, { backgroundColor: cardBg, borderColor: accentBlue + '30' }]}>
-            <Text style={[styles.compassionQuote, { color: '#fff' }]}>
-              "{COMPASSION_STATEMENTS[compassionIdx]}"
-            </Text>
-            <View style={[styles.divider, { backgroundColor: accentBlue + '30' }]} />
-            <Text style={[styles.compassionSub, { color: softBlue + '80' }]}>
-              The science is clear: self-compassion after a slip predicts better recovery than self-criticism.
-            </Text>
-          </View>
+          <GlassCard intensity={30} style={{ width: '100%' }}>
+            <View style={styles.compassionCardContent}>
+              <Text style={[styles.compassionQuote, { color: '#fff' }]}>
+                "{COMPASSION_STATEMENTS[compassionIdx]}"
+              </Text>
+              <View style={[styles.divider, { backgroundColor: colors.border }]} />
+              <Text style={[styles.compassionSub, { color: colors.textSecondary }]}>
+                The science is clear: self-compassion after a slip predicts better recovery than self-criticism.
+              </Text>
+            </View>
+          </GlassCard>
+          
           <TouchableOpacity
+            onPressIn={() => { reflectBtnScale.value = withSpring(0.96); }}
+            onPressOut={() => { reflectBtnScale.value = withSpring(1); }}
             onPress={() => goToPhase('reflect')}
-            style={[styles.primaryBtn, { backgroundColor: accentBlue }]}
-            activeOpacity={0.8}
+            activeOpacity={0.88}
+            style={{ width: '100%' }}
           >
-            <Text style={styles.primaryBtnText}>I'm ready to reflect →</Text>
+            <AnimatedReanimated.View style={[{ transform: [{ scale: reflectBtnScale.value }] }]}>
+              <LinearGradient
+                colors={colors.gradients.calmAccent}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.primaryBtnGradient}
+              >
+                <Text style={styles.primaryBtnText}>I'm ready to reflect →</Text>
+              </LinearGradient>
+            </AnimatedReanimated.View>
           </TouchableOpacity>
         </Animated.View>
       )}
@@ -194,72 +231,87 @@ export default function RelapseScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <Text style={[styles.bigTitle, { color: softBlue }]}>What happened?</Text>
-            <Text style={[styles.subtitle, { color: softBlue + 'AA' }]}>No judgment — just honest data.</Text>
+            <Text style={[styles.bigTitle, { color: colors.text }]}>What happened?</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>No judgment — just honest data.</Text>
 
-            <Text style={[styles.fieldLabel, { color: softBlue + '70' }]}>WHICH HABIT?</Text>
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>WHICH HABIT?</Text>
             <View style={styles.chipGrid}>
-              {metrics.filter(m => m.category === 'reduce').map(m => (
-                <TouchableOpacity
-                  key={m.id}
-                  onPress={() => { setSelectedMetricId(m.id); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                  style={[styles.chip, {
-                    backgroundColor: selectedMetricId === m.id ? accentBlue : accentBlue + '15',
-                    borderColor: selectedMetricId === m.id ? accentBlue : accentBlue + '30',
-                  }]}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.chipEmoji}>{m.emoji ?? '📊'}</Text>
-                  <Text style={[styles.chipText, { color: selectedMetricId === m.id ? '#fff' : softBlue }]}>
-                    {m.isSensitive ? '••••' : m.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {metrics.filter(m => m.category === 'reduce').map(m => {
+                const selected = selectedMetricId === m.id;
+                return (
+                  <TouchableOpacity
+                    key={m.id}
+                    onPress={() => { setSelectedMetricId(m.id); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                    style={[styles.chip, {
+                      backgroundColor: selected ? colors.brand.calm : colors.surface,
+                      borderColor: selected ? colors.brand.calm : colors.border,
+                    }]}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.chipEmoji}>{m.emoji ?? '⚠️'}</Text>
+                    <Text style={[styles.chipText, { color: selected ? '#fff' : colors.text }]}>
+                      {m.isSensitive ? '••••' : m.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
-            <Text style={[styles.fieldLabel, { color: softBlue + '70' }]}>WHAT TRIGGERED IT?</Text>
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>WHAT TRIGGERED IT?</Text>
             <View style={styles.triggerGrid}>
-              {TRIGGER_CATEGORIES.map(t => (
-                <TouchableOpacity
-                  key={t.id}
-                  onPress={() => { setTriggerCategory(t.id); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                  style={[styles.triggerCard, {
-                    backgroundColor: triggerCategory === t.id ? accentBlue + '25' : cardBg,
-                    borderColor: triggerCategory === t.id ? accentBlue : accentBlue + '25',
-                  }]}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.triggerEmoji}>{t.emoji}</Text>
-                  <Text style={[styles.triggerLabel, { color: triggerCategory === t.id ? '#fff' : softBlue }]}>{t.label}</Text>
-                  <Text style={[styles.triggerDesc, { color: softBlue + '60' }]}>{t.description}</Text>
-                </TouchableOpacity>
-              ))}
+              {TRIGGER_CATEGORIES.map(t => {
+                const selected = triggerCategory === t.id;
+                return (
+                  <TouchableOpacity
+                    key={t.id}
+                    onPress={() => { setTriggerCategory(t.id); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                    style={[styles.triggerCard, {
+                      backgroundColor: selected ? colors.brand.calm + '25' : colors.surface,
+                      borderColor: selected ? colors.brand.calm : colors.border,
+                    }]}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.triggerEmoji}>{t.emoji}</Text>
+                    <Text style={[styles.triggerLabel, { color: selected ? '#fff' : colors.text }]}>{t.label}</Text>
+                    <Text style={[styles.triggerDesc, { color: colors.textSecondary }]}>{t.description}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             {triggerCategory && (
               <>
-                <Text style={[styles.fieldLabel, { color: softBlue + '70' }]}>TELL ME MORE (optional)</Text>
+                <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>TELL ME MORE (optional)</Text>
                 <TextInput
                   value={triggerDetail}
                   onChangeText={setTriggerDetail}
                   placeholder={`What specifically was happening when you ${triggerCategory === 'stress' ? 'felt overwhelmed' : 'slipped'}?`}
-                  placeholderTextColor={softBlue + '40'}
+                  placeholderTextColor={colors.textDim}
                   multiline
-                  style={[styles.textArea, { borderColor: accentBlue + '35', color: '#fff' }]}
+                  style={[styles.textArea, { borderColor: colors.border, backgroundColor: colors.surface, color: '#fff' }]}
+                  selectionColor={colors.brand.calm}
                 />
               </>
             )}
 
             <TouchableOpacity
+              onPressIn={() => { nextBtnScale.value = withSpring(0.97); }}
+              onPressOut={() => { nextBtnScale.value = withSpring(1); }}
               onPress={() => { if (selectedMetricId && triggerCategory) goToPhase('intention'); }}
               disabled={!selectedMetricId || !triggerCategory}
-              style={[styles.primaryBtn, {
-                backgroundColor: accentBlue,
-                opacity: (!selectedMetricId || !triggerCategory) ? 0.35 : 1,
-              }]}
-              activeOpacity={0.8}
+              style={{ width: '100%', marginTop: 10, opacity: (!selectedMetricId || !triggerCategory) ? 0.45 : 1 }}
+              activeOpacity={0.88}
             >
-              <Text style={styles.primaryBtnText}>Next: Set your intention →</Text>
+              <AnimatedReanimated.View style={[{ transform: [{ scale: nextBtnScale.value }] }]}>
+                <LinearGradient
+                  colors={colors.gradients.calmAccent}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.primaryBtnGradient}
+                >
+                  <Text style={styles.primaryBtnText}>Next: Set your intention →</Text>
+                </LinearGradient>
+              </AnimatedReanimated.View>
             </TouchableOpacity>
           </Animated.ScrollView>
         </KeyboardAvoidingView>
@@ -274,63 +326,67 @@ export default function RelapseScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <Text style={[styles.bigTitle, { color: softBlue }]}>One concrete next step</Text>
-            <Text style={[styles.subtitle, { color: softBlue + 'AA' }]}>
+            <Text style={[styles.bigTitle, { color: colors.text }]}>One concrete next step</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               Implementation intentions increase follow-through by 2–3×. What will you do right now?
             </Text>
 
-            <Text style={[styles.fieldLabel, { color: softBlue + '70' }]}>CHOOSE OR TYPE YOUR ACTION</Text>
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>CHOOSE YOUR ACTION</Text>
             <View style={styles.actionList}>
-              {NEXT_ACTIONS.map(action => (
-                <TouchableOpacity
-                  key={action}
-                  onPress={() => {
-                    setSelectedNextAction(action);
-                    setCustomNextAction('');
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  }}
-                  style={[styles.actionRow, {
-                    backgroundColor: selectedNextAction === action && !customNextAction ? accentBlue + '20' : cardBg,
-                    borderColor: selectedNextAction === action && !customNextAction ? accentBlue : accentBlue + '25',
-                  }]}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name={selectedNextAction === action && !customNextAction ? 'checkmark-circle' : 'ellipse-outline'}
-                    size={18}
-                    color={selectedNextAction === action && !customNextAction ? accentBlue : softBlue + '50'}
-                  />
-                  <Text style={[styles.actionText, { color: softBlue }]}>{action}</Text>
-                </TouchableOpacity>
-              ))}
+              {NEXT_ACTIONS.map(action => {
+                const selected = selectedNextAction === action && !customNextAction;
+                return (
+                  <TouchableOpacity
+                    key={action}
+                    onPress={() => {
+                      setSelectedNextAction(action);
+                      setCustomNextAction('');
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }}
+                    style={[styles.actionRow, {
+                      backgroundColor: selected ? colors.brand.calm + '20' : colors.surface,
+                      borderColor: selected ? colors.brand.calm : colors.border,
+                    }]}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={18}
+                      color={selected ? colors.brand.calm : colors.textSecondary}
+                    />
+                    <Text style={[styles.actionText, { color: colors.text }]}>{action}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
-            <Text style={[styles.fieldLabel, { color: softBlue + '70' }]}>OR WRITE YOUR OWN</Text>
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>OR WRITE YOUR OWN</Text>
             <TextInput
               value={customNextAction}
               onChangeText={t => { setCustomNextAction(t); setSelectedNextAction(''); }}
               placeholder="Something specific, doable in the next hour..."
-              placeholderTextColor={softBlue + '40'}
+              placeholderTextColor={colors.textDim}
               multiline
-              style={[styles.textArea, { borderColor: accentBlue + '35', color: '#fff' }]}
+              style={[styles.textArea, { borderColor: colors.border, backgroundColor: colors.surface, color: '#fff' }]}
+              selectionColor={colors.brand.calm}
             />
 
-            <View style={[styles.neverMissCard, { borderColor: accentBlue + '35', backgroundColor: cardBg }]}>
-              <Ionicons name="infinite-outline" size={18} color={accentBlue} />
-              <Text style={[styles.neverMissText, { color: softBlue + 'BB' }]}>
+            <View style={[styles.neverMissCard, { borderColor: colors.brand.calm + '35', backgroundColor: colors.surface }]}>
+              <Ionicons name="infinite-outline" size={18} color={colors.brand.calm} />
+              <Text style={[styles.neverMissText, { color: colors.textSecondary }]}>
                 Never miss twice. One day reset. Your progress is preserved. You're still on this.
               </Text>
             </View>
 
-            <TouchableOpacity
-              onPress={handleSubmit}
+            <CommitmentButton
+              onComplete={handleSubmit}
               disabled={!canSubmit}
-              style={[styles.primaryBtn, { backgroundColor: accentBlue, opacity: canSubmit ? 1 : 0.35 }]}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="shield-checkmark-outline" size={18} color="#fff" />
-              <Text style={styles.primaryBtnText}>Log setback & keep going</Text>
-            </TouchableOpacity>
+              color={colors.brand.calm || '#3b82f6'}
+              label="Hold to Log Setback & Reset"
+              completedLabel="Setback Logged!"
+              icon="shield-checkmark"
+              duration={2000}
+            />
           </Animated.ScrollView>
         </KeyboardAvoidingView>
       )}
@@ -338,20 +394,31 @@ export default function RelapseScreen() {
       {/* ─── DONE ─── */}
       {phase === 'done' && (
         <Animated.View style={[styles.centeredContainer, { opacity: phaseAnim }]}>
-          <View style={[styles.doneIconWrap, { backgroundColor: accentBlue + '20' }]}>
-            <Ionicons name="shield-checkmark" size={56} color={accentBlue} />
+          <View style={[styles.doneIconWrap, { backgroundColor: colors.brand.calm + '20', borderColor: colors.brand.calm + '40', borderWidth: 1 }]}>
+            <Ionicons name="shield-checkmark" size={56} color={colors.brand.calm} />
           </View>
-          <Text style={[styles.bigTitle, { color: softBlue }]}>Logged.</Text>
-          <Text style={[styles.subtitle, { color: softBlue + '90' }]}>
+          <Text style={[styles.bigTitle, { color: colors.text }]}>Logged.</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
             Awareness is the first act of recovery.{'\n'}Never miss twice.
           </Text>
-          <View style={[styles.compassionCard, { backgroundColor: cardBg, borderColor: accentBlue + '25' }]}>
-            <Text style={[styles.compassionQuote, { color: softBlue + 'CC' }]}>
-              You have the data. You have a plan. Now execute the next step.
-            </Text>
-          </View>
-          <TouchableOpacity onPress={() => router.back()} style={[styles.primaryBtn, { backgroundColor: accentBlue }]} activeOpacity={0.8}>
-            <Text style={styles.primaryBtnText}>Continue →</Text>
+          
+          <GlassCard intensity={30} style={{ width: '100%' }}>
+            <View style={styles.compassionCardContent}>
+              <Text style={[styles.compassionQuote, { color: colors.text }]}>
+                You have the data. You have a plan. Now execute the next step.
+              </Text>
+            </View>
+          </GlassCard>
+          
+          <TouchableOpacity onPress={() => router.back()} activeOpacity={0.88} style={{ width: '100%' }}>
+            <LinearGradient
+              colors={colors.gradients.calmAccent}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.primaryBtnGradient}
+            >
+              <Text style={styles.primaryBtnText}>Continue →</Text>
+            </LinearGradient>
           </TouchableOpacity>
         </Animated.View>
       )}
@@ -366,23 +433,21 @@ const styles = StyleSheet.create({
   scrollContent: { paddingHorizontal: 24, paddingBottom: 60, gap: 14 },
   bigTitle: { fontSize: 26, fontFamily: 'Inter_700Bold', textAlign: 'center', letterSpacing: -0.5 },
   subtitle: { fontSize: 14, fontFamily: 'Inter_400Regular', textAlign: 'center', lineHeight: 21 },
-  breatheRing: { width: 200, height: 200, alignItems: 'center', justifyContent: 'center' },
-  breatheOuter: { width: 170, height: 170, borderRadius: 85, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  breatheInner: { width: 124, height: 124, borderRadius: 62, borderWidth: 2, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  breatheRing: { width: 200, height: 200, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  breatheOuter: { width: 170, height: 170, borderRadius: 85, borderWidth: 2, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  breatheInner: { width: 124, height: 124, borderRadius: 62, borderWidth: 2, alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(6, 13, 31, 0.6)' },
   breatheStep: { fontSize: 12, fontFamily: 'Inter_500Medium', letterSpacing: 1 },
   breatheTimer: { fontSize: 34, fontFamily: 'Inter_700Bold' },
   breatheHint: { fontSize: 12, fontFamily: 'Inter_400Regular' },
   skipBtn: { marginTop: 4, paddingVertical: 8 },
   skipText: { fontSize: 13, fontFamily: 'Inter_400Regular' },
-  compassionCard: {
-    borderWidth: 1, borderRadius: 16, padding: 20, gap: 12, width: '100%',
-  },
+  compassionCardContent: { padding: 20, gap: 12 },
   compassionQuote: { fontSize: 16, fontFamily: 'Inter_500Medium', lineHeight: 24, textAlign: 'center', fontStyle: 'italic' },
   compassionSub: { fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 18, textAlign: 'center' },
   divider: { height: 1, width: '100%' },
-  primaryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', paddingVertical: 15, borderRadius: 14 },
+  primaryBtnGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', paddingVertical: 16, borderRadius: 14 },
   primaryBtnText: { fontSize: 15, fontFamily: 'Inter_700Bold', color: '#fff' },
-  fieldLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 2.5, marginTop: 6 },
+  fieldLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 2.5, marginTop: 12 },
   chipGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, borderWidth: 1 },
   chipEmoji: { fontSize: 14 },
@@ -391,7 +456,7 @@ const styles = StyleSheet.create({
   triggerCard: { width: '48%', borderWidth: 1, borderRadius: 12, padding: 12, gap: 4 },
   triggerEmoji: { fontSize: 22 },
   triggerLabel: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
-  triggerDesc: { fontSize: 10, fontFamily: 'Inter_400Regular' },
+  triggerDesc: { fontSize: 10, fontFamily: 'Inter_400Regular', lineHeight: 14 },
   textArea: {
     borderWidth: 1, borderRadius: 12, padding: 14, fontSize: 14,
     fontFamily: 'Inter_400Regular', minHeight: 80, textAlignVertical: 'top', lineHeight: 21,
@@ -401,5 +466,5 @@ const styles = StyleSheet.create({
   actionText: { flex: 1, fontSize: 13, fontFamily: 'Inter_400Regular', lineHeight: 18 },
   neverMissCard: { flexDirection: 'row', gap: 10, borderWidth: 1, borderRadius: 12, padding: 14, alignItems: 'flex-start' },
   neverMissText: { flex: 1, fontSize: 13, fontFamily: 'Inter_400Regular', lineHeight: 18 },
-  doneIconWrap: { width: 100, height: 100, borderRadius: 50, alignItems: 'center', justifyContent: 'center' },
+  doneIconWrap: { width: 100, height: 100, borderRadius: 50, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
 });

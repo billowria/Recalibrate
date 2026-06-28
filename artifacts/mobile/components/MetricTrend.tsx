@@ -49,12 +49,12 @@ export function MetricTrend({ logs, category, inputType, maxValue = 10 }: Props)
         const dayLabel = days[i % 7];
         return (
           <View key={i} style={styles.barCol}>
-            <View style={[styles.barBg, { height: BAR_HEIGHT, backgroundColor: colors.border + '33' }]}>
+            <View style={[styles.barBg, { height: BAR_HEIGHT, backgroundColor: colors.border + '50' }]}>
               <View style={[styles.bar, { height: h, backgroundColor: color }]} />
             </View>
-            <Text style={[styles.dayLabel, { color: colors.mutedForeground }]}>{dayLabel}</Text>
+            <Text style={[styles.dayLabel, { color: colors.textSecondary }]}>{dayLabel}</Text>
             {log.value >= 0 ? (
-              <Text style={[styles.valueLabel, { color: colors.mutedForeground }]}>
+              <Text style={[styles.valueLabel, { color: color, fontFamily: 'Inter_700Bold' }]}>
                 {inputType === 'boolean' ? (log.value === 1 ? '✓' : '✗') : log.value}
               </Text>
             ) : (
@@ -71,16 +71,16 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 6,
-    paddingVertical: 8,
+    gap: 8,
+    paddingVertical: 10,
   },
   barCol: {
     flex: 1,
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
   },
   barBg: {
-    width: '100%',
+    width: 8,
     borderRadius: 4,
     justifyContent: 'flex-end',
     overflow: 'hidden',
@@ -91,10 +91,9 @@ const styles = StyleSheet.create({
   },
   dayLabel: {
     fontSize: 10,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: 'Inter_600SemiBold',
   },
   valueLabel: {
     fontSize: 9,
-    fontFamily: 'Inter_400Regular',
   },
 });

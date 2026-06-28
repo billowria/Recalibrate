@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Alert,
   Platform,
@@ -11,14 +11,16 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Animated as RNAnimated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, BADGES } from '@/context/AppContext';
 import { useColors } from '@/hooks/useColors';
-import { AVAILABLE_PROGRAMS } from '@/constants/program';
-import { customFetch } from '@workspace/api-client-react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { GlassCard } from '@/components/GlassCard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { customFetch } from '@workspace/api-client-react';
 import {
   NotificationSettings,
   getNotificationSettings,
@@ -28,45 +30,283 @@ import {
   setupAllNotifications,
 } from '@/notifications/manager';
 
-const SCORE_WEIGHT_LABELS = [
-  { label: 'Build habits', pct: 38, color: '#22c55e' },
-  { label: 'Reduce habits', pct: 32, color: '#ef4444' },
-  { label: 'Monitoring', pct: 20, color: '#f59e0b' },
-  { label: 'Focus bonus', pct: 10, color: '#6366f1' },
-];
-
-function StatCard({ icon, label, value, color, colors }: { icon: any; label: string; value: string; color: string; colors: any }) {
+// Premium Stat Card component
+function PremiumStatCard({
+  icon,
+  label,
+  value,
+  color,
+  colors,
+}: {
+  icon: any;
+  label: string;
+  value: string;
+  color: string;
+  colors: any;
+}) {
   return (
-    <View style={[scStyles.card, { backgroundColor: color + '0E', borderColor: color + '25', borderRadius: colors.radius }]}>
-      <Ionicons name={icon} size={22} color={color} />
-      <Text style={[scStyles.val, { color: colors.foreground }]}>{value}</Text>
-      <Text style={[scStyles.label, { color: colors.mutedForeground }]}>{label}</Text>
+    <View
+      style={[
+        statsStyles.card,
+        {
+          backgroundColor: colors.surfaceMid,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <View style={[statsStyles.iconWrapper, { backgroundColor: color + '15' }]}>
+        <Ionicons name={icon} size={18} color={color} />
+      </View>
+      <View style={statsStyles.textWrapper}>
+        <Text style={[statsStyles.value, { color: colors.text }]}>{value}</Text>
+        <Text style={[statsStyles.label, { color: colors.textMuted }]}>{label}</Text>
+      </View>
     </View>
   );
 }
-const scStyles = StyleSheet.create({
-  card: { flex: 1, alignItems: 'center', paddingVertical: 14, gap: 4, borderWidth: 1 },
-  val: { fontSize: 20, fontFamily: 'Inter_700Bold' },
-  label: { fontSize: 9, fontFamily: 'Inter_500Medium', letterSpacing: 1, textAlign: 'center' },
+
+const statsStyles = StyleSheet.create({
+  card: {
+    width: '48%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 12,
+    marginBottom: 10,
+  },
+  iconWrapper: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textWrapper: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  value: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+    lineHeight: 22,
+  },
+  label: {
+    fontSize: 10,
+    fontFamily: 'Inter_600SemiBold',
+    letterSpacing: 0.5,
+    marginTop: 2,
+  },
 });
 
-function SectionHeader({ title, colors }: { title: string; colors: any }) {
+// Custom Premium Toggle Switch
+function CustomToggle({
+  active,
+  onToggle,
+  colors,
+}: {
+  active: boolean;
+  onToggle: () => void;
+  colors: any;
+}) {
+  const animatedValue = useRef(new RNAnimated.Value(active ? 1 : 0)).current;
+
+  useEffect(() => {
+    RNAnimated.timing(animatedValue, {
+      toValue: active ? 1 : 0,
+      duration: 200,
+      useNativeDriver: false,
+    }).start();
+  }, [active]);
+
+  const toggleTranslate = animatedValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [2, 18],
+  });
+
+  const toggleBg = animatedValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [colors.border, colors.brand.primary],
+  });
+
   return (
-    <Text style={[shStyles.label, { color: colors.mutedForeground }]}>{title}</Text>
+    <TouchableOpacity activeOpacity={0.8} onPress={onToggle}>
+      <RNAnimated.View style={[toggleStyles.track, { backgroundColor: toggleBg }]}>
+        <RNAnimated.View
+          style={[
+            toggleStyles.thumb,
+            {
+              transform: [{ translateX: toggleTranslate }],
+              backgroundColor: '#FFFFFF',
+            },
+          ]}
+        />
+      </RNAnimated.View>
+    </TouchableOpacity>
   );
 }
-const shStyles = StyleSheet.create({
-  label: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 2, marginTop: 4 },
+
+const toggleStyles = StyleSheet.create({
+  track: {
+    width: 38,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  thumb: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    position: 'absolute',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+});
+
+// Custom Pomodoro Stepper Controller
+function FocusStepper({
+  label,
+  icon,
+  color,
+  value,
+  onChange,
+  colors,
+}: {
+  label: string;
+  icon: string;
+  color: string;
+  value: number;
+  onChange: (val: number) => void;
+  colors: any;
+}) {
+  const handleDecrement = () => {
+    if (value > 1) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onChange(value - 1);
+    }
+  };
+
+  const handleIncrement = () => {
+    if (value < 120) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onChange(value + 1);
+    }
+  };
+
+  return (
+    <View style={stepperStyles.row}>
+      <View style={[stepperStyles.left, { backgroundColor: color + '12' }]}>
+        <Ionicons name={icon as any} size={18} color={color} />
+      </View>
+      <Text style={[stepperStyles.label, { color: colors.text }]}>{label}</Text>
+      
+      <View style={stepperStyles.controls}>
+        <TouchableOpacity
+          onPress={handleDecrement}
+          style={[stepperStyles.btn, { borderColor: colors.border, backgroundColor: colors.surfaceHigh }]}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="remove" size={16} color={colors.text} />
+        </TouchableOpacity>
+        
+        <View style={stepperStyles.valueContainer}>
+          <Text style={[stepperStyles.value, { color: color }]}>{value}</Text>
+          <Text style={[stepperStyles.unit, { color: colors.textMuted }]}>min</Text>
+        </View>
+        
+        <TouchableOpacity
+          onPress={handleIncrement}
+          style={[stepperStyles.btn, { borderColor: colors.border, backgroundColor: colors.surfaceHigh }]}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="add" size={16} color={colors.text} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const stepperStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  left: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  label: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+  },
+  controls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  btn: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  valueContainer: {
+    width: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 2,
+  },
+  value: {
+    fontSize: 16,
+    fontFamily: 'Inter_700Bold',
+  },
+  unit: {
+    fontSize: 10,
+    fontFamily: 'Inter_500Medium',
+  },
 });
 
 export default function ProfileScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
-    profile, updateProfile, metrics, dailyLogs, journalEntries, relapseLogs,
-    disciplineScore, totalXP, currentLevel, currentStreak, highestStreak,
-    badges, levelProgress, levelMax, availablePrograms, getProgramProgress,
-    exportData, deleteAllData, logout,
+    profile,
+    updateProfile,
+    metrics,
+    dailyLogs,
+    journalEntries,
+    relapseLogs,
+    disciplineScore,
+    totalXP,
+    currentLevel,
+    currentStreak,
+    highestStreak,
+    badges,
+    levelProgress,
+    levelMax,
+    availablePrograms,
+    getProgramProgress,
+    exportData,
+    deleteAllData,
+    logout,
+    pomodoroSettings,
+    setPomodoroSettings,
+    themeMode,
+    setThemeMode,
   } = useApp();
 
   const [editingName, setEditingName] = useState(false);
@@ -76,21 +316,28 @@ export default function ProfileScreen() {
   const [notifSettings, setNotifSettings] = useState<NotificationSettings | null>(null);
   const [notifPermGranted, setNotifPermGranted] = useState(false);
   const [userEmail, setUserEmail] = useState('');
+
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
 
-  React.useEffect(() => {
+  useEffect(() => {
     getNotificationSettings().then(setNotifSettings);
     areNotificationsEnabled().then(setNotifPermGranted);
-    AsyncStorage.getItem('lastSessionEmail').then(e => { if (e) setUserEmail(e); });
+    AsyncStorage.getItem('lastSessionEmail').then((e) => {
+      if (e) setUserEmail(e);
+    });
   }, []);
 
   const handleToggleNotif = async (key: keyof NotificationSettings) => {
     if (!notifSettings) return;
-    const next = { ...notifSettings, [key]: !notifSettings[key] };
+    const nextValue = !notifSettings[key];
+    const next = { ...notifSettings, [key]: nextValue };
+    
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setNotifSettings(next);
-    await setNotificationSettings({ [key]: !notifSettings[key] });
+    await setNotificationSettings({ [key]: nextValue });
+
     if (key === 'enabled') {
-      if (!notifSettings.enabled) {
+      if (nextValue) {
         const granted = await requestNotificationPermissions();
         setNotifPermGranted(granted);
         if (granted) {
@@ -109,20 +356,19 @@ export default function ProfileScreen() {
     }
   };
 
-  const notifWebDisabled = Platform.OS === 'web';
-
-  const totalDaysTracked = new Set(dailyLogs.map(l => l.date)).size;
-  const avgDailyLogs = totalDaysTracked > 0 ? Math.round(dailyLogs.length / totalDaysTracked) : 0;
-  const enrolledPrograms = availablePrograms.filter(p => profile.activeProgramIds.includes(p.id));
-
   const handleSaveName = () => {
-    if (nameInput.trim()) updateProfile({ name: nameInput.trim() });
+    if (nameInput.trim()) {
+      updateProfile({ name: nameInput.trim() });
+    }
     setEditingName(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
   const handleSaveTimes = () => {
-    updateProfile({ wakeTime: wakeInput.trim() || profile.wakeTime, bedTime: bedInput.trim() || profile.bedTime });
+    updateProfile({
+      wakeTime: wakeInput.trim() || profile.wakeTime,
+      bedTime: bedInput.trim() || profile.bedTime,
+    });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
@@ -130,7 +376,10 @@ export default function ProfileScreen() {
     try {
       const csv = exportData();
       if (Platform.OS === 'web') {
-        Alert.alert('Data Export', `Your data contains ${csv.split('\n').length - 1} rows. In a native app, this would download as CSV.`);
+        Alert.alert(
+          'Data Export',
+          `Your data contains ${csv.split('\n').length - 1} rows. In a native app, this would download as CSV.`
+        );
         return;
       }
       await Share.share({
@@ -148,7 +397,7 @@ export default function ProfileScreen() {
       await customFetch(`/users/${userId}/test-push`, { method: 'POST' });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e) {
-      Alert.alert('Error', 'Could not send test push');
+      Alert.alert('Error', 'Could not send test push notification');
     }
   };
 
@@ -173,7 +422,7 @@ export default function ProfileScreen() {
   const handleLogout = () => {
     Alert.alert(
       'Sign Out',
-      'You will be signed out. Your data will remain on this device. You can sign back in anytime.',
+      'You will be signed out. Your data will remain safely on this device. You can sign back in anytime.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -189,403 +438,1059 @@ export default function ProfileScreen() {
     );
   };
 
-  const streakColor = currentStreak >= 14 ? colors.scoreGreen : currentStreak >= 7 ? colors.primary : colors.mutedForeground;
-  const scoreColor = disciplineScore >= 75 ? colors.scoreGreen : disciplineScore >= 40 ? colors.scoreYellow : colors.scoreRed;
+  const totalDaysTracked = new Set(dailyLogs.map((l) => l.date)).size;
+  const enrolledPrograms = availablePrograms.filter((p) => profile.activeProgramIds.includes(p.id));
+
+  // Visual highlight colors
+  const scoreColor = colors.getScoreColor(disciplineScore);
+  const scoreGradient = colors.getScoreGradient(disciplineScore);
+  const levelPct = levelMax > 0 ? (levelProgress / levelMax) * 100 : 0;
 
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
-      contentContainerStyle={[styles.content, {
-        paddingTop: topPadding + 16,
-        paddingBottom: Platform.OS === 'web' ? 140 : 120,
-      }]}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: topPadding + 16,
+          paddingBottom: Platform.OS === 'web' ? 140 : 120,
+        },
+      ]}
       showsVerticalScrollIndicator={false}
     >
       {/* ─── HEADER ─── */}
       <View style={styles.header}>
         <View>
-          <Text style={[styles.title, { color: colors.foreground }]}>Profile</Text>
-          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Your stats & settings</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Profile</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+            Your stats & discipline settings
+          </Text>
         </View>
+        
         <TouchableOpacity
           onPress={handleLogout}
-          style={[styles.logoutBtn, { backgroundColor: colors.destructive + '12', borderColor: colors.destructive + '30' }]}
+          style={[
+            styles.logoutBtn,
+            {
+              backgroundColor: colors.destructive + '12',
+              borderColor: colors.destructive + '30',
+            },
+          ]}
           activeOpacity={0.75}
         >
-          <Ionicons name="log-out-outline" size={16} color={colors.destructive} />
+          <Ionicons name="log-out-outline" size={15} color={colors.destructive} />
           <Text style={[styles.logoutBtnText, { color: colors.destructive }]}>Sign Out</Text>
         </TouchableOpacity>
       </View>
 
-      {/* ─── IDENTITY CARD ─── */}
-      <View style={[styles.identityCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-        <View style={[styles.avatarWrap, { backgroundColor: colors.primary + '15' }]}>
-          <Text style={styles.avatarEmoji}>🧭</Text>
-        </View>
-        <View style={styles.identityRight}>
-          {editingName ? (
-            <View style={styles.nameEditRow}>
-              <TextInput
-                value={nameInput}
-                onChangeText={setNameInput}
-                autoFocus
-                placeholder="Your name"
-                placeholderTextColor={colors.mutedForeground}
-                style={[styles.nameInput, { color: colors.foreground, borderColor: colors.primary, backgroundColor: colors.background }]}
-                onSubmitEditing={handleSaveName}
-              />
-              <TouchableOpacity onPress={handleSaveName} style={[styles.saveNameBtn, { backgroundColor: colors.primary }]} activeOpacity={0.7}>
-                <Ionicons name="checkmark" size={16} color="#fff" />
+      {/* ─── IDENTITY CARD (GLASSMORPHIC) ─── */}
+      <GlassCard style={styles.identityCard} elevated>
+        <View style={styles.identityHeader}>
+          {/* Glowing Avatar */}
+          <View style={styles.avatarContainer}>
+            <LinearGradient
+              colors={colors.gradients.primaryShort}
+              style={styles.avatarGradientRing}
+            >
+              <View style={[styles.avatarInner, { backgroundColor: colors.surfaceMid }]}>
+                <Text style={styles.avatarEmoji}>🧭</Text>
+              </View>
+            </LinearGradient>
+            
+            {/* Level Badge Overlay */}
+            <LinearGradient
+              colors={colors.gradients.primaryShort}
+              style={styles.levelBadge}
+            >
+              <Text style={styles.levelBadgeText}>{currentLevel}</Text>
+            </LinearGradient>
+          </View>
+
+          {/* User Details */}
+          <View style={styles.identityDetails}>
+            {editingName ? (
+              <View style={styles.nameEditRow}>
+                <TextInput
+                  value={nameInput}
+                  onChangeText={setNameInput}
+                  autoFocus
+                  placeholder="Your name"
+                  placeholderTextColor={colors.textMuted}
+                  style={[
+                    styles.nameInput,
+                    {
+                      color: colors.text,
+                      borderColor: colors.brand.primary,
+                      backgroundColor: colors.surfaceHigh,
+                    },
+                  ]}
+                  onSubmitEditing={handleSaveName}
+                />
+                <TouchableOpacity
+                  onPress={handleSaveName}
+                  style={[styles.saveNameBtn, { backgroundColor: colors.brand.primary }]}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="checkmark" size={16} color="#FFF" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={() => {
+                  setEditingName(true);
+                  setNameInput(profile.name);
+                }}
+                activeOpacity={0.7}
+                style={styles.nameRow}
+              >
+                <Text style={[styles.identityName, { color: colors.text }]}>
+                  {profile.name || 'Anonymous User'}
+                </Text>
+                <Ionicons name="pencil-outline" size={14} color={colors.textSecondary} />
               </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity onPress={() => { setEditingName(true); setNameInput(profile.name); }} activeOpacity={0.7} style={styles.nameRow}>
-              <Text style={[styles.identityName, { color: colors.foreground }]}>
-                {profile.name || 'Set your name'}
-              </Text>
-              <Ionicons name="pencil-outline" size={14} color={colors.mutedForeground} />
-            </TouchableOpacity>
-          )}
-          {userEmail ? (
-            <Text style={[styles.userEmail, { color: colors.mutedForeground }]}>{userEmail}</Text>
-          ) : null}
-          <View style={[styles.levelPill, { backgroundColor: colors.primary }]}>
-            <Text style={styles.levelPillText}>LVL {currentLevel}</Text>
+            )}
+            
+            {userEmail ? (
+              <Text style={[styles.userEmail, { color: colors.textSecondary }]}>{userEmail}</Text>
+            ) : null}
+            
+            <Text style={[styles.xpText, { color: colors.textMuted }]}>
+              {totalXP} XP earned
+            </Text>
+          </View>
+        </View>
+
+        {/* Level Progress Bar */}
+        <View style={styles.levelProgressSection}>
+          <View style={styles.levelBarLabelRow}>
+            <Text style={[styles.levelBarLabel, { color: colors.textSecondary }]}>Level Progress</Text>
+            <Text style={[styles.levelBarVal, { color: colors.brand.primaryLight }]}>
+              {levelProgress} / {levelMax} XP
+            </Text>
           </View>
           <View style={[styles.levelBarBg, { backgroundColor: colors.border }]}>
-            <View style={[styles.levelBarFill, { width: `${(levelProgress / levelMax) * 100}%` as any, backgroundColor: colors.primary }]} />
+            <LinearGradient
+              colors={colors.gradients.primaryShort}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={[styles.levelBarFill, { width: `${levelPct}%` }]}
+            />
           </View>
-          <Text style={[styles.xpLabel, { color: colors.mutedForeground }]}>
-            {totalXP} XP total · {levelMax - levelProgress} to next level
-          </Text>
         </View>
-      </View>
+      </GlassCard>
+
+      {/* ─── AI COACH ─── */}
+      <TouchableOpacity onPress={() => router.push('/coach')} activeOpacity={0.85} style={{ marginBottom: 24 }}>
+        <LinearGradient
+          colors={colors.gradients.primaryShort}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={{ padding: 18, borderRadius: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: colors.brand.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 8 }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            <View style={{ backgroundColor: 'rgba(255,255,255,0.25)', width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="sparkles" size={24} color="#FFF" />
+            </View>
+            <View>
+              <Text style={{ fontSize: 17, fontFamily: 'Inter_700Bold', color: '#FFF' }}>AI Coach</Text>
+              <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: 'rgba(255,255,255,0.85)' }}>Your personal behavior guide</Text>
+            </View>
+          </View>
+          <View style={{ backgroundColor: 'rgba(255,255,255,0.15)', padding: 8, borderRadius: 12 }}>
+            <Ionicons name="chevron-forward" size={20} color="#FFF" />
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
 
       {/* ─── STATS GRID ─── */}
-      <View style={styles.statsRow}>
-        <StatCard icon="flame-outline" label="Streak" value={`${currentStreak}d`} color={streakColor} colors={colors} />
-        <StatCard icon="trophy-outline" label="Best" value={`${highestStreak}d`} color="#f59e0b" colors={colors} />
-        <StatCard icon="calendar-outline" label="Days" value={`${totalDaysTracked}`} color={colors.primary} colors={colors} />
-        <StatCard icon="book-outline" label="Journals" value={`${journalEntries.length}`} color="#6366f1" colors={colors} />
-      </View>
-      <View style={styles.statsRow}>
-        <StatCard icon="pulse-outline" label="Today score" value={`${disciplineScore}`} color={scoreColor} colors={colors} />
-        <StatCard icon="checkmark-done-outline" label="Total logs" value={`${dailyLogs.length}`} color={colors.scoreGreen} colors={colors} />
-        <StatCard icon="shield-outline" label="Setbacks" value={`${relapseLogs.length}`} color={colors.scoreRed} colors={colors} />
-        <StatCard icon="star-outline" label="Badges" value={`${badges.length}`} color="#f59e0b" colors={colors} />
+      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>STATISTICS INSIGHTS</Text>
+      <View style={styles.statsGrid}>
+        <PremiumStatCard
+          icon="flame"
+          label="Current Streak"
+          value={`${currentStreak}d`}
+          color={colors.brand.primary}
+          colors={colors}
+        />
+        <PremiumStatCard
+          icon="trophy"
+          label="All-Time Best"
+          value={`${highestStreak}d`}
+          color={colors.brand.secondary}
+          colors={colors}
+        />
+        <PremiumStatCard
+          icon="calendar"
+          label="Days Tracked"
+          value={`${totalDaysTracked}`}
+          color={colors.brand.success}
+          colors={colors}
+        />
+        <PremiumStatCard
+          icon="book"
+          label="Journal Logs"
+          value={`${journalEntries.length}`}
+          color={colors.brand.calm}
+          colors={colors}
+        />
+        <PremiumStatCard
+          icon="pulse"
+          label="Today's Score"
+          value={`${disciplineScore}%`}
+          color={scoreColor}
+          colors={colors}
+        />
+        <PremiumStatCard
+          icon="checkmark-done-circle"
+          label="Total Check-ins"
+          value={`${dailyLogs.length}`}
+          color={colors.brand.success}
+          colors={colors}
+        />
+        <PremiumStatCard
+          icon="shield-half"
+          label="Lapses Logged"
+          value={`${relapseLogs.length}`}
+          color={colors.brand.danger}
+          colors={colors}
+        />
+        <PremiumStatCard
+          icon="star"
+          label="Badges Unlocked"
+          value={`${badges.length}`}
+          color={colors.brand.xp}
+          colors={colors}
+        />
       </View>
 
-      {/* ─── BADGES ─── */}
+      {/* ─── BADGES EARNED ─── */}
       {badges.length > 0 && (
         <>
-          <SectionHeader title="BADGES EARNED" colors={colors} />
-          <View style={[styles.badgesCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-            <View style={styles.badgeGrid}>
-              {badges.map(bId => {
-                const badge = BADGES.find(b => b.id === bId);
+          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>UNLOCKED BADGES</Text>
+          <GlassCard style={styles.sectionCard}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.badgeScroll}>
+              {badges.map((bId) => {
+                const badge = BADGES.find((b) => b.id === bId);
                 if (!badge) return null;
                 return (
-                  <View key={bId} style={[styles.badgeItem, { backgroundColor: colors.primary + '12', borderRadius: 10 }]}>
-                    <Text style={styles.badgeEmoji}>{badge.emoji}</Text>
-                    <Text style={[styles.badgeName, { color: colors.primary }]}>{badge.name}</Text>
-                    <Text style={[styles.badgeDesc, { color: colors.mutedForeground }]}>{badge.description}</Text>
+                  <View
+                    key={bId}
+                    style={[
+                      styles.badgeItem,
+                      {
+                        backgroundColor: colors.surfaceHigh,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.badgeIconBg}>
+                      <Text style={styles.badgeEmoji}>{badge.emoji}</Text>
+                    </View>
+                    <Text style={[styles.badgeName, { color: colors.text }]}>{badge.name}</Text>
+                    <Text style={[styles.badgeDesc, { color: colors.textSecondary }]} numberOfLines={2}>
+                      {badge.description}
+                    </Text>
                   </View>
                 );
               })}
-            </View>
-          </View>
+            </ScrollView>
+          </GlassCard>
         </>
       )}
 
-      {/* ─── PROGRAMS ─── */}
+      {/* ─── ACTIVE PROGRAMS ─── */}
       {enrolledPrograms.length > 0 && (
         <>
-          <SectionHeader title="ACTIVE PROGRAMS" colors={colors} />
-          {enrolledPrograms.map(prog => {
+          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>ACTIVE PROTOCOLS</Text>
+          {enrolledPrograms.map((prog) => {
             const progress = getProgramProgress(prog.id);
             if (!progress) return null;
             const pct = (progress.completedWeeks.length / prog.totalWeeks) * 100;
             return (
-              <View key={prog.id} style={[styles.progCard, { backgroundColor: prog.color + '0E', borderColor: prog.color + '30', borderRadius: colors.radius }]}>
+              <GlassCard
+                key={prog.id}
+                style={styles.programCard}
+                borderColor={prog.color + '30'}
+              >
                 <View style={styles.progCardTop}>
                   <Text style={styles.progEmoji}>{prog.emoji}</Text>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.progTitle, { color: colors.foreground }]}>{prog.title}</Text>
-                    <Text style={[styles.progMeta, { color: colors.mutedForeground }]}>
-                      Week {progress.currentWeek} / {prog.totalWeeks} · {progress.completedWeeks.length} weeks complete
+                    <Text style={[styles.progTitle, { color: colors.text }]}>{prog.title}</Text>
+                    <Text style={[styles.progMeta, { color: colors.textSecondary }]}>
+                      Week {progress.currentWeek} of {prog.totalWeeks} · {progress.completedWeeks.length} complete
                     </Text>
                   </View>
                   <Text style={[styles.progPct, { color: prog.color }]}>{Math.round(pct)}%</Text>
                 </View>
-                <View style={[styles.progBarBg, { backgroundColor: prog.color + '20' }]}>
-                  <View style={[styles.progBarFill, { width: `${pct}%` as any, backgroundColor: prog.color }]} />
+                
+                <View style={[styles.progBarBg, { backgroundColor: colors.border }]}>
+                  <LinearGradient
+                    colors={[prog.color, prog.color + 'A0']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={[styles.progBarFill, { width: `${pct}%` }]}
+                  />
                 </View>
-              </View>
+              </GlassCard>
             );
           })}
         </>
       )}
 
-      {/* ─── SCORE FORMULA ─── */}
-      <SectionHeader title="SCORE FORMULA" colors={colors} />
-      <View style={[styles.formulaCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-        <Text style={[styles.formulaIntro, { color: colors.mutedForeground }]}>
-          Your discipline score is a weighted combination of four dimensions. It updates each time you log.
+      {/* ─── SCORE FORMULA BREAKDOWN ─── */}
+      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>SCORE FORMULA</Text>
+      <GlassCard style={styles.sectionCard}>
+        <Text style={[styles.formulaIntro, { color: colors.textSecondary }]}>
+          Your daily Discipline Score is a weighted combination of habits and focus. Updates dynamically as you log.
         </Text>
-        {SCORE_WEIGHT_LABELS.map(w => (
+        {[
+          { label: 'Build Habits', pct: 38, color: colors.brand.success },
+          { label: 'Reduce Habits', pct: 32, color: colors.brand.danger },
+          { label: 'Monitoring Check-ins', pct: 20, color: colors.brand.warning },
+          { label: 'Focus Cycles', pct: 10, color: colors.brand.primary },
+        ].map((w) => (
           <View key={w.label} style={styles.formulaRow}>
             <View style={[styles.formulaColorDot, { backgroundColor: w.color }]} />
-            <Text style={[styles.formulaLabel, { color: colors.foreground }]}>{w.label}</Text>
+            <Text style={[styles.formulaLabel, { color: colors.text }]}>{w.label}</Text>
             <View style={[styles.formulaBarBg, { backgroundColor: colors.border }]}>
-              <View style={[styles.formulaBarFill, { width: `${w.pct}%` as any, backgroundColor: w.color }]} />
+              <View style={[styles.formulaBarFill, { width: `${w.pct}%`, backgroundColor: w.color }]} />
             </View>
             <Text style={[styles.formulaPct, { color: w.color }]}>{w.pct}%</Text>
           </View>
         ))}
-        <View style={[styles.formulaNote, { backgroundColor: colors.primary + '0E', borderRadius: 8, borderColor: colors.primary + '25' }]}>
-          <Ionicons name="information-circle-outline" size={14} color={colors.primary} />
-          <Text style={[styles.formulaNoteText, { color: colors.mutedForeground }]}>
-            Focus sessions add up to +10 bonus points. Sensitivity-masked metrics don't affect others' view.
+        
+        <View
+          style={[
+            styles.formulaNote,
+            {
+              backgroundColor: colors.brand.primaryGlowSoft,
+              borderColor: colors.brand.primary + '20',
+            },
+          ]}
+        >
+          <Ionicons name="information-circle-outline" size={15} color={colors.brand.primaryLight} />
+          <Text style={[styles.formulaNoteText, { color: colors.textSecondary }]}>
+            Deep Focus Pomodoro cycles award up to +10 bonus points. Sensitivity-masked trackers do not penalize your public index.
           </Text>
         </View>
-      </View>
+      </GlassCard>
 
-      {/* ─── NOTIFICATIONS ─── */}
-      <SectionHeader title="NOTIFICATIONS" colors={colors} />
-      <View style={[styles.notifCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-        <TouchableOpacity
-          onPress={() => !notifWebDisabled && handleToggleNotif('enabled')}
-          activeOpacity={notifWebDisabled ? 1 : 0.7}
-          style={[styles.notifRow, { opacity: notifWebDisabled ? 0.5 : 1 }]}
-        >
-          <View style={styles.notifLeft}>
-            <Ionicons name="notifications-outline" size={18} color={colors.primary} />
-            <Text style={[styles.notifLabel, { color: colors.foreground }]}>Push notifications</Text>
+      {/* ─── FOCUS TIMER CYCLES ─── */}
+      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>FOCUS TIMER CYCLES</Text>
+      <GlassCard style={styles.sectionCard}>
+        <Text style={[styles.focusTimerDesc, { color: colors.textSecondary }]}>
+          Configure your deep work Pomodoro periods. Custom configurations apply instantly to your next focus session.
+        </Text>
+        <FocusStepper
+          label="Work Session"
+          icon="flame-outline"
+          color={colors.brand.primary}
+          value={pomodoroSettings.workMinutes}
+          onChange={(val) => setPomodoroSettings({ workMinutes: val })}
+          colors={colors}
+        />
+        <View style={[styles.settingDivider, { backgroundColor: colors.border }]} />
+        <FocusStepper
+          label="Short Break"
+          icon="leaf-outline"
+          color={colors.brand.success}
+          value={pomodoroSettings.shortBreak}
+          onChange={(val) => setPomodoroSettings({ shortBreak: val })}
+          colors={colors}
+        />
+        <View style={[styles.settingDivider, { backgroundColor: colors.border }]} />
+        <FocusStepper
+          label="Long Break"
+          icon="cafe-outline"
+          color={colors.brand.warning}
+          value={pomodoroSettings.longBreak}
+          onChange={(val) => setPomodoroSettings({ longBreak: val })}
+          colors={colors}
+        />
+      </GlassCard>
+
+      {/* ─── NOTIFICATIONS & REMINDERS ─── */}
+      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>RECALIBRATE REMINDERS</Text>
+      <GlassCard style={styles.sectionCard}>
+        <View style={styles.notifMainRow}>
+          <View style={styles.notifIconBg}>
+            <Ionicons name="notifications-outline" size={16} color={colors.brand.primaryLight} />
           </View>
-          <View style={[styles.notifToggle, { backgroundColor: (notifSettings?.enabled ?? false) ? colors.primary : colors.border }]}>
-            <View style={[styles.notifToggleDot, {
-              backgroundColor: '#fff',
-              transform: [{ translateX: (notifSettings?.enabled ?? false) ? 14 : 0 }],
-            }]} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.notifLabel, { color: colors.text }]}>Push Notifications</Text>
+            <Text style={[styles.notifSubtext, { color: colors.textSecondary }]}>
+              Tactile triggers and evening check-in reminders
+            </Text>
           </View>
-        </TouchableOpacity>
-        {notifWebDisabled && (
-          <Text style={[styles.notifWebNote, { color: colors.mutedForeground }]}>
-            Notifications are only available on native iOS/Android.
-          </Text>
-        )}
+          <CustomToggle
+            active={notifSettings?.enabled ?? false}
+            onToggle={() => handleToggleNotif('enabled')}
+            colors={colors}
+          />
+        </View>
+
         {(notifSettings?.enabled ?? false) && (
-          <>
-            <View style={[styles.notifDivider, { backgroundColor: colors.border }]} />
+          <View style={styles.subNotifsContainer}>
+            <View style={[styles.settingDivider, { backgroundColor: colors.border, marginVertical: 8 }]} />
             {[
-              { key: 'trackingReminder' as const, label: 'Morning reminder', icon: 'sunny-outline' as const },
-              { key: 'eveningReminder' as const, label: 'Evening reminder', icon: 'moon-outline' as const },
-              { key: 'journalReminder' as const, label: 'Journal prompt', icon: 'book-outline' as const },
-              { key: 'streakRiskReminder' as const, label: 'Streak at-risk', icon: 'flame-outline' as const },
-              { key: 'pomodoroReminder' as const, label: 'Focus session', icon: 'time-outline' as const },
-            ].map(item => (
-              <TouchableOpacity
-                key={item.key}
-                onPress={() => handleToggleNotif(item.key)}
-                style={styles.notifSubRow}
-                activeOpacity={0.7}
-              >
-                <View style={styles.notifLeft}>
-                  <Ionicons name={item.icon} size={14} color={colors.mutedForeground} />
-                  <Text style={[styles.notifSubLabel, { color: colors.foreground }]}>{item.label}</Text>
-                </View>
-                <View style={[styles.notifCheck, {
-                  borderColor: (notifSettings?.[item.key] ?? false) ? colors.primary : colors.border,
-                  backgroundColor: (notifSettings?.[item.key] ?? false) ? colors.primary : 'transparent',
-                }]}>
-                  {(notifSettings?.[item.key] ?? false) && <Ionicons name="checkmark" size={10} color="#fff" />}
-                </View>
-              </TouchableOpacity>
+              { key: 'trackingReminder' as const, label: 'Morning setup alert', icon: 'sunny-outline' },
+              { key: 'eveningReminder' as const, label: 'Evening recap prompt', icon: 'moon-outline' },
+              { key: 'journalReminder' as const, label: 'Daily reflection prompt', icon: 'book-outline' },
+              { key: 'streakRiskReminder' as const, label: 'Streak risk warning', icon: 'flame-outline' },
+              { key: 'pomodoroReminder' as const, label: 'Focus countdown notifications', icon: 'time-outline' },
+            ].map((item) => (
+              <View key={item.key} style={styles.subNotifRow}>
+                <Ionicons name={item.icon as any} size={15} color={colors.textSecondary} style={{ marginRight: 10 }} />
+                <Text style={[styles.subNotifText, { color: colors.text }]}>{item.label}</Text>
+                <CustomToggle
+                  active={notifSettings?.[item.key] ?? false}
+                  onToggle={() => handleToggleNotif(item.key)}
+                  colors={colors}
+                />
+              </View>
             ))}
+
             <TouchableOpacity
               onPress={handleTestPush}
-              style={[styles.testPushBtn, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '30' }]}
+              style={[
+                styles.testPushBtn,
+                {
+                  backgroundColor: colors.brand.primaryGlowSoft,
+                  borderColor: colors.brand.primary + '30',
+                },
+              ]}
               activeOpacity={0.7}
             >
-              <Ionicons name="paper-plane-outline" size={16} color={colors.primary} />
-              <Text style={[styles.testPushText, { color: colors.primary }]}>Send Test Notification</Text>
+              <Ionicons name="paper-plane" size={14} color={colors.brand.primaryLight} />
+              <Text style={[styles.testPushText, { color: colors.brand.primaryLight }]}>
+                Send Test Push Notification
+              </Text>
             </TouchableOpacity>
-          </>
+          </View>
         )}
-      </View>
+      </GlassCard>
 
-      {/* ─── TIMES ─── */}
-      <SectionHeader title="DAILY TARGETS" colors={colors} />
-      <View style={[styles.timesCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-        <View style={styles.timeRow}>
-          <Ionicons name="sunny-outline" size={18} color="#f59e0b" />
-          <Text style={[styles.timeLabel, { color: colors.foreground }]}>Wake time</Text>
+      {/* ─── DAILY TARGETS ─── */}
+      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>CIRCADIAN TARGETS</Text>
+      <GlassCard style={styles.sectionCard}>
+        <View style={styles.timeInputRow}>
+          <View style={[styles.timeIconWrap, { backgroundColor: colors.brand.warning + '12' }]}>
+            <Ionicons name="sunny-outline" size={18} color={colors.brand.warning} />
+          </View>
+          <Text style={[styles.timeLabel, { color: colors.text }]}>Wake-up Target</Text>
           <TextInput
             value={wakeInput}
             onChangeText={setWakeInput}
             onBlur={handleSaveTimes}
             placeholder="06:00"
-            placeholderTextColor={colors.mutedForeground}
-            style={[styles.timeInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+            placeholderTextColor={colors.textMuted}
+            style={[
+              styles.timeTextInput,
+              {
+                color: colors.text,
+                borderColor: colors.border,
+                backgroundColor: colors.surfaceHigh,
+              },
+            ]}
           />
         </View>
-        <View style={[styles.timeDivider, { backgroundColor: colors.border }]} />
-        <View style={styles.timeRow}>
-          <Ionicons name="moon-outline" size={18} color="#6366f1" />
-          <Text style={[styles.timeLabel, { color: colors.foreground }]}>Bed time</Text>
+        <View style={[styles.settingDivider, { backgroundColor: colors.border }]} />
+        <View style={styles.timeInputRow}>
+          <View style={[styles.timeIconWrap, { backgroundColor: colors.brand.primary + '12' }]}>
+            <Ionicons name="moon-outline" size={18} color={colors.brand.primaryLight} />
+          </View>
+          <Text style={[styles.timeLabel, { color: colors.text }]}>Bedtime Target</Text>
           <TextInput
             value={bedInput}
             onChangeText={setBedInput}
             onBlur={handleSaveTimes}
             placeholder="22:30"
-            placeholderTextColor={colors.mutedForeground}
-            style={[styles.timeInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+            placeholderTextColor={colors.textMuted}
+            style={[
+              styles.timeTextInput,
+              {
+                color: colors.text,
+                borderColor: colors.border,
+                backgroundColor: colors.surfaceHigh,
+              },
+            ]}
           />
         </View>
-      </View>
+      </GlassCard>
 
-      {/* ─── DATA SECTION ─── */}
-      <SectionHeader title="YOUR DATA" colors={colors} />
-      <View style={[styles.dataCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-        <View style={styles.dataStats}>
-          <View style={styles.dataStat}>
-            <Text style={[styles.dataStatNum, { color: colors.foreground }]}>{dailyLogs.length}</Text>
-            <Text style={[styles.dataStatLabel, { color: colors.mutedForeground }]}>log entries</Text>
-          </View>
-          <View style={[styles.dataStatDivider, { backgroundColor: colors.border }]} />
-          <View style={styles.dataStat}>
-            <Text style={[styles.dataStatNum, { color: colors.foreground }]}>{journalEntries.length}</Text>
-            <Text style={[styles.dataStatLabel, { color: colors.mutedForeground }]}>journals</Text>
-          </View>
-          <View style={[styles.dataStatDivider, { backgroundColor: colors.border }]} />
-          <View style={styles.dataStat}>
-            <Text style={[styles.dataStatNum, { color: colors.foreground }]}>{totalDaysTracked}</Text>
-            <Text style={[styles.dataStatLabel, { color: colors.mutedForeground }]}>days tracked</Text>
-          </View>
-        </View>
-        <Text style={[styles.dataOwnership, { color: colors.mutedForeground }]}>
-          All your data lives only on this device. It is never shared or uploaded.
+      {/* ─── APPEARANCE ─── */}
+      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>APPEARANCE</Text>
+      <GlassCard style={styles.sectionCard}>
+        <Text style={[styles.appearanceDesc, { color: colors.textSecondary }]}>
+          Choose your interface theme. System adapts to your device settings.
         </Text>
+        <View style={[styles.themeSelectorContainer, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}>
+          {[
+            { mode: 'system' as const, label: 'System', icon: 'settings-outline' },
+            { mode: 'light' as const, label: 'Light', icon: 'sunny-outline' },
+            { mode: 'dark' as const, label: 'Dark', icon: 'moon-outline' },
+          ].map((item) => {
+            const active = themeMode === item.mode;
+            return (
+              <TouchableOpacity
+                key={item.mode}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setThemeMode(item.mode);
+                }}
+                style={[
+                  styles.themeTab,
+                  active && {
+                    backgroundColor: colors.brand.primary,
+                  },
+                ]}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name={item.icon as any}
+                  size={14}
+                  color={active ? '#FFFFFF' : colors.textSecondary}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
+                  style={[
+                    styles.themeTabText,
+                    {
+                      color: active ? '#FFFFFF' : colors.textSecondary,
+                      fontFamily: active ? 'Inter_600SemiBold' : 'Inter_500Medium',
+                    },
+                  ]}
+                >
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </GlassCard>
+
+      {/* ─── DATA MANAGEMENT ─── */}
+      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>DATA SENSITIVITY</Text>
+      <GlassCard style={styles.sectionCard}>
+        <View style={styles.dataOwnershipRow}>
+          <Ionicons name="shield-checkmark" size={18} color={colors.brand.success} />
+          <Text style={[styles.dataOwnershipText, { color: colors.textSecondary }]}>
+            Discipline OS operates offline-first. Your metrics and reflections are stored locally on-device and are never sold or shared.
+          </Text>
+        </View>
+        
         <TouchableOpacity
           onPress={handleExportData}
-          style={[styles.dataActionBtn, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '30', borderRadius: 10 }]}
+          style={[
+            styles.dataActionBtn,
+            {
+              backgroundColor: colors.surfaceHigh,
+              borderColor: colors.border,
+            },
+          ]}
           activeOpacity={0.8}
         >
-          <Ionicons name="download-outline" size={18} color={colors.primary} />
+          <Ionicons name="download-outline" size={18} color={colors.brand.primaryLight} />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.dataActionTitle, { color: colors.primary }]}>Export data as CSV</Text>
-            <Text style={[styles.dataActionSub, { color: colors.mutedForeground }]}>
-              All logs, journals, and metrics
+            <Text style={[styles.dataActionTitle, { color: colors.text }]}>Export Local Data</Text>
+            <Text style={[styles.dataActionSub, { color: colors.textSecondary }]}>
+              Generates a full history CSV bundle
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+          <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
         </TouchableOpacity>
+
         <TouchableOpacity
           onPress={handleDeleteData}
-          style={[styles.dataActionBtn, { backgroundColor: colors.destructive + '0E', borderColor: colors.destructive + '25', borderRadius: 10 }]}
+          style={[
+            styles.dataActionBtn,
+            {
+              backgroundColor: colors.destructive + '12',
+              borderColor: colors.destructive + '30',
+              marginTop: 10,
+            },
+          ]}
           activeOpacity={0.8}
         >
           <Ionicons name="trash-outline" size={18} color={colors.destructive} />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.dataActionTitle, { color: colors.destructive }]}>Delete all data</Text>
-            <Text style={[styles.dataActionSub, { color: colors.mutedForeground }]}>
-              Permanently wipe everything. Irreversible.
+            <Text style={[styles.dataActionTitle, { color: colors.destructive }]}>
+              Erase All Data
+            </Text>
+            <Text style={[styles.dataActionSub, { color: colors.destructive + 'A0' }]}>
+              Irreversibly clears device memory
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={14} color={colors.destructive} />
         </TouchableOpacity>
-      </View>
+      </GlassCard>
 
       {/* ─── ONBOARDING REDO ─── */}
       <TouchableOpacity
-        onPress={() => router.push('/onboarding')}
-        style={[styles.reOnboardBtn, { borderColor: colors.border, borderRadius: colors.radius }]}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          router.push('/onboarding');
+        }}
+        style={[styles.reOnboardBtn, { borderColor: colors.border }]}
         activeOpacity={0.7}
       >
-        <Ionicons name="refresh-outline" size={16} color={colors.mutedForeground} />
-        <Text style={[styles.reOnboardText, { color: colors.mutedForeground }]}>Re-run setup wizard</Text>
+        <Ionicons name="refresh" size={14} color={colors.textSecondary} />
+        <Text style={[styles.reOnboardText, { color: colors.textSecondary }]}>
+          Re-run behavioral setup wizard
+        </Text>
       </TouchableOpacity>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  content: { paddingHorizontal: 16, gap: 12 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  title: { fontSize: 28, fontFamily: 'Inter_700Bold', letterSpacing: -0.5 },
-  subtitle: { fontSize: 13, fontFamily: 'Inter_400Regular', marginTop: 2 },
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
-  logoutBtnText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  identityCard: { borderWidth: 1, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 16 },
-  avatarWrap: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
-  avatarEmoji: { fontSize: 28 },
-  identityRight: { flex: 1, gap: 6 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  nameEditRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  nameInput: { flex: 1, borderWidth: 1.5, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 16, fontFamily: 'Inter_600SemiBold' },
-  saveNameBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  identityName: { fontSize: 18, fontFamily: 'Inter_700Bold' },
-  userEmail: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: -2 },
-  levelPill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-  levelPillText: { fontSize: 11, fontFamily: 'Inter_700Bold', color: '#fff', letterSpacing: 1 },
-  levelBarBg: { height: 4, borderRadius: 2, overflow: 'hidden' },
-  levelBarFill: { height: 4, borderRadius: 2 },
-  xpLabel: { fontSize: 10, fontFamily: 'Inter_400Regular' },
-  statsRow: { flexDirection: 'row', gap: 8 },
-  badgesCard: { borderWidth: 1, padding: 14 },
-  badgeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  badgeItem: { padding: 12, alignItems: 'center', gap: 4, minWidth: 80 },
-  badgeEmoji: { fontSize: 24 },
-  badgeName: { fontSize: 11, fontFamily: 'Inter_700Bold', textAlign: 'center' },
-  badgeDesc: { fontSize: 9, fontFamily: 'Inter_400Regular', textAlign: 'center' },
-  progCard: { borderWidth: 1, padding: 14, gap: 8 },
-  progCardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  progEmoji: { fontSize: 22 },
-  progTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
-  progMeta: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
-  progPct: { fontSize: 20, fontFamily: 'Inter_700Bold' },
-  progBarBg: { height: 4, borderRadius: 2, overflow: 'hidden' },
-  progBarFill: { height: 4, borderRadius: 2 },
-  formulaCard: { borderWidth: 1, padding: 16, gap: 10 },
-  formulaIntro: { fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 18 },
-  formulaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  formulaColorDot: { width: 8, height: 8, borderRadius: 4 },
-  formulaLabel: { width: 100, fontSize: 12, fontFamily: 'Inter_500Medium' },
-  formulaBarBg: { flex: 1, height: 5, borderRadius: 3, overflow: 'hidden' },
-  formulaBarFill: { height: 5, borderRadius: 3 },
-  formulaPct: { fontSize: 11, fontFamily: 'Inter_700Bold', width: 30, textAlign: 'right' },
-  formulaNote: { flexDirection: 'row', gap: 8, padding: 10, alignItems: 'flex-start', borderWidth: 1 },
-  formulaNoteText: { flex: 1, fontSize: 11, fontFamily: 'Inter_400Regular', lineHeight: 16 },
-  timesCard: { borderWidth: 1, padding: 14, gap: 0 },
-  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
-  timeLabel: { flex: 1, fontSize: 14, fontFamily: 'Inter_500Medium' },
-  timeInput: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 15, fontFamily: 'Inter_700Bold', width: 80, textAlign: 'center' },
-  timeDivider: { height: 1 },
-  dataCard: { borderWidth: 1, padding: 14, gap: 12 },
-  dataStats: { flexDirection: 'row', alignItems: 'center' },
-  dataStat: { flex: 1, alignItems: 'center', gap: 2 },
-  dataStatNum: { fontSize: 22, fontFamily: 'Inter_700Bold' },
-  dataStatLabel: { fontSize: 10, fontFamily: 'Inter_500Medium' },
-  dataStatDivider: { width: 1, height: 30 },
-  dataOwnership: { fontSize: 11, fontFamily: 'Inter_400Regular', lineHeight: 16 },
-  dataActionBtn: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, padding: 14 },
-  dataActionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
-  dataActionSub: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 1 },
-  reOnboardBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderStyle: 'dashed', paddingVertical: 13 },
-  reOnboardText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
-  notifCard: { borderWidth: 1, padding: 14, gap: 0 },
-  notifRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
-  notifLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  notifLabel: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
-  notifToggle: { width: 38, height: 22, borderRadius: 11, padding: 3, justifyContent: 'center' },
-  notifToggleDot: { width: 16, height: 16, borderRadius: 8 },
-  notifWebNote: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 4 },
-  notifDivider: { height: 1, marginVertical: 8 },
-  notifSubRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
-  notifSubLabel: { fontSize: 13, fontFamily: 'Inter_500Medium' },
-  notifCheck: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  testPushBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderWidth: 1, borderRadius: 8, marginTop: 8 },
-  testPushText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  container: {
+    flex: 1,
+  },
+  content: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  title: {
+    fontSize: 32,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: -1,
+  },
+  subtitle: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    marginTop: 2,
+  },
+  logoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  logoutBtnText: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  identityCard: {
+    padding: 16,
+    marginBottom: 8,
+  },
+  identityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  avatarContainer: {
+    position: 'relative',
+  },
+  avatarGradientRing: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 2,
+  },
+  avatarInner: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarEmoji: {
+    fontSize: 28,
+  },
+  levelBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#000000',
+  },
+  levelBadgeText: {
+    fontSize: 10,
+    fontFamily: 'Inter_700Bold',
+    color: '#FFFFFF',
+  },
+  identityDetails: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  nameEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+  },
+  nameInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 15,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  saveNameBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  identityName: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+  },
+  userEmail: {
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    marginTop: 1,
+  },
+  xpText: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    marginTop: 2,
+  },
+  levelProgressSection: {
+    marginTop: 18,
+  },
+  levelBarLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  levelBarLabel: {
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  levelBarVal: {
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+  },
+  levelBarBg: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  levelBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  sectionLabel: {
+    fontSize: 10,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 1.5,
+    marginTop: 14,
+    marginBottom: 4,
+    paddingLeft: 4,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  sectionCard: {
+    padding: 16,
+  },
+  badgeScroll: {
+    gap: 12,
+    paddingRight: 16,
+  },
+  badgeItem: {
+    width: 105,
+    padding: 12,
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  badgeIconBg: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  badgeEmoji: {
+    fontSize: 22,
+  },
+  badgeName: {
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    textAlign: 'center',
+  },
+  badgeDesc: {
+    fontSize: 9,
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
+    marginTop: 4,
+    lineHeight: 12,
+    height: 24,
+  },
+  programCard: {
+    padding: 14,
+    borderWidth: 1,
+  },
+  progCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  progEmoji: {
+    fontSize: 24,
+  },
+  progTitle: {
+    fontSize: 15,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  progMeta: {
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    marginTop: 1,
+  },
+  progPct: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+  },
+  progBarBg: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  formulaIntro: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  formulaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  formulaColorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  formulaLabel: {
+    width: 120,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+  },
+  formulaBarBg: {
+    flex: 1,
+    height: 5,
+    borderRadius: 2.5,
+    overflow: 'hidden',
+  },
+  formulaBarFill: {
+    height: '100%',
+    borderRadius: 2.5,
+  },
+  formulaPct: {
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    width: 32,
+    textAlign: 'right',
+  },
+  formulaNote: {
+    flexDirection: 'row',
+    gap: 8,
+    padding: 10,
+    alignItems: 'flex-start',
+    borderWidth: 1,
+    borderRadius: 10,
+    marginTop: 12,
+  },
+  formulaNoteText: {
+    flex: 1,
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    lineHeight: 16,
+  },
+  settingDivider: {
+    height: 1,
+    marginVertical: 4,
+  },
+  focusTimerDesc: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  notifMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  notifIconBg: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: 'rgba(91, 94, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notifLabel: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  notifSubtext: {
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    marginTop: 1,
+  },
+  subNotifsContainer: {
+    marginTop: 8,
+  },
+  subNotifRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  subNotifText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
+  testPushBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderRadius: 10,
+    marginTop: 14,
+  },
+  testPushText: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  timeInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  timeIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  timeLabel: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+  },
+  timeTextInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    fontSize: 14,
+    fontFamily: 'Inter_700Bold',
+    width: 66,
+    textAlign: 'center',
+  },
+  dataOwnershipRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 16,
+  },
+  dataOwnershipText: {
+    flex: 1,
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    lineHeight: 16,
+  },
+  dataActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    padding: 12,
+    borderRadius: 12,
+  },
+  dataActionTitle: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  dataActionSub: {
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    marginTop: 1,
+  },
+  reOnboardBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    paddingVertical: 14,
+    borderRadius: 16,
+    marginTop: 20,
+  },
+  reOnboardText: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  appearanceDesc: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  themeSelectorContainer: {
+    flexDirection: 'row',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 4,
+    gap: 4,
+  },
+  themeTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  themeTabText: {
+    fontSize: 13,
+  },
 });

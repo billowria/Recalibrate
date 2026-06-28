@@ -77,7 +77,7 @@ export async function registerForPushNotificationsAsync(): Promise<string | unde
       shouldShowAlert: true,
       shouldPlaySound: true,
       shouldSetBadge: false,
-    }),
+    } as any),
   });
 
   try {

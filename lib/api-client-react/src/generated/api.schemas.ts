@@ -33,6 +33,7 @@ export interface UserProfileSync {
   highestStreak: number;
   onboardingComplete: boolean;
   activeProgramIds: string[];
+  savedProgramIds: string[];
 }
 
 export interface LoginResponse {
@@ -65,13 +66,22 @@ export interface DailyLogSync {
   note?: string | null;
 }
 
+export type JournalEntrySyncProgramContext = {
+  missedTaskIds?: string[];
+  hitTaskIds?: string[];
+  programId?: string;
+} | null;
+
 export interface JournalEntrySync {
   id: string;
   date: string;
   prompt: string;
   response: string;
-  mood: number;
-  energy: number;
+  mood?: number | null;
+  energy?: number | null;
+  freeResponse?: string | null;
+  isWeeklyReflection?: boolean;
+  programContext?: JournalEntrySyncProgramContext;
   tags?: string[];
   wordCount?: number;
 }

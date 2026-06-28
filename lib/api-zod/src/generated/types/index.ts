@@ -10,6 +10,7 @@ export * from './dailyLogSync';
 export * from './focusLogSync';
 export * from './healthStatus';
 export * from './journalEntrySync';
+export * from './journalEntrySyncProgramContext';
 export * from './loginRequest';
 export * from './loginResponse';
 export * from './metricSync';

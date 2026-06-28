@@ -15,4 +15,5 @@ export interface UserProfileSync {
   highestStreak: number;
   onboardingComplete: boolean;
   activeProgramIds: string[];
+  savedProgramIds: string[];
 }
