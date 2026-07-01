@@ -127,7 +127,7 @@ interface SolidCardProps {
 
 export function SolidCard({ children, style, color }: SolidCardProps) {
   return (
-    <GlassCard variant="soft" style={StyleSheet.flatten([{ backgroundColor: color }, style])}>
+    <GlassCard variant="soft" style={[{ backgroundColor: color }, style]}>
       {children}
     </GlassCard>
   );

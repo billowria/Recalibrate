@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { programs, workoutDays, workoutDayExercises, exercises } from "@workspace/db/schema";
-import { eq, or } from "drizzle-orm";
+import { programs, programWeeks, programTasks } from "@workspace/db/schema";
+import { eq, and, or } from "drizzle-orm";
 
 const router = Router();
 
@@ -9,29 +9,26 @@ const router = Router();
 router.get("/programs", async (req, res) => {
   try {
     const { authorId } = req.query;
-    let condition = eq(programs.isTemplate, true);
+    let condition = eq(programs.isPublished, true);
     
     if (authorId && typeof authorId === "string" && authorId.trim().length > 0) {
-      condition = or(eq(programs.isTemplate, true), eq(programs.userId, authorId)) as any;
+      condition = or(eq(programs.isPublished, true), eq(programs.authorId, authorId)) as any;
     }
 
     const allPrograms = await db.select().from(programs).where(condition);
     
+    // For each program, we ideally want to fetch its weeks and tasks.
+    // For simplicity, we can do it in a loop here, or use relations if Drizzle relations are configured.
+    // Since relations might not be set up in the schema file, we'll fetch manually.
     const fullPrograms = await Promise.all(allPrograms.map(async (p) => {
-      const days = await db.select().from(workoutDays).where(eq(workoutDays.programId, p.id));
+      const weeks = await db.select().from(programWeeks).where(eq(programWeeks.programId, p.id));
       
-      const daysWithExercises = await Promise.all(days.map(async (d) => {
-        const dayExs = await db.select().from(workoutDayExercises).where(eq(workoutDayExercises.workoutDayId, d.id));
-        
-        const dayExsWithDetails = await Promise.all(dayExs.map(async (de) => {
-          const [exDetails] = await db.select().from(exercises).where(eq(exercises.id, de.exerciseId));
-          return { ...de, exercise: exDetails };
-        }));
-
-        return { ...d, exercises: dayExsWithDetails };
+      const weeksWithTasks = await Promise.all(weeks.map(async (w) => {
+        const tasks = await db.select().from(programTasks).where(eq(programTasks.weekId, w.id));
+        return { ...w, tasks };
       }));
       
-      return { ...p, days: daysWithExercises };
+      return { ...p, weeks: weeksWithTasks };
     }));
 
     res.json(fullPrograms);
@@ -44,59 +41,73 @@ router.get("/programs", async (req, res) => {
 // Create a custom program
 router.post("/programs", async (req, res) => {
   try {
-    const { title, emoji, description, color, authorId, days } = req.body;
+    const { title, emoji, description, color, totalWeeks, authorId, forkedFromId, weeks } = req.body;
+    
+    // Generate an ID
     const programId = `custom-${Date.now()}`;
     
     const [newProgram] = await db.insert(programs).values({
       id: programId,
-      userId: authorId,
       title,
-      emoji: emoji || "💪",
+      emoji,
       description,
-      color: color || "#7C3AED",
-      isTemplate: false
+      color,
+      totalWeeks,
+      isSystem: false,
+      isPublished: false, // Default to private
+      authorId,
+      forkedFromId
     }).returning();
 
-    if (days && Array.isArray(days)) {
-      for (const d of days) {
-        const [newDay] = await db.insert(workoutDays).values({
+    if (weeks && Array.isArray(weeks)) {
+      for (const w of weeks) {
+        const weekId = `${programId}-w${w.weekNumber}`;
+        await db.insert(programWeeks).values({
+          id: weekId,
           programId,
-          dayNumber: d.dayNumber,
-          title: d.title,
-          targetMuscleGroups: d.targetMuscleGroups || []
-        }).returning();
+          weekNumber: w.weekNumber,
+          theme: w.theme,
+          goal: w.goal,
+          psychologyRationale: w.psychologyRationale,
+          dailyJournalPrompt: w.dailyJournalPrompt,
+          weeklyReflectionPrompt: w.weeklyReflectionPrompt
+        });
 
-        if (d.exercises && Array.isArray(d.exercises)) {
-          for (let i = 0; i < d.exercises.length; i++) {
-            const ex = d.exercises[i];
-            await db.insert(workoutDayExercises).values({
-              workoutDayId: newDay.id,
-              exerciseId: ex.exerciseId,
-              sortOrder: i + 1,
-              targetSets: ex.targetSets || 3,
-              targetReps: ex.targetReps || 10,
-              targetRpe: ex.targetRpe || 8
+        if (w.tasks && Array.isArray(w.tasks)) {
+          for (let i = 0; i < w.tasks.length; i++) {
+            const t = w.tasks[i];
+            const taskId = `${weekId}-t${i + 1}`;
+            await db.insert(programTasks).values({
+              id: taskId,
+              weekId,
+              title: t.title,
+              description: t.description,
+              isHabit: t.isHabit,
+              metricCategory: t.metricCategory,
+              metricInputType: t.metricInputType,
+              metricUnitLabel: t.metricUnitLabel,
+              metricScoreWeight: t.metricScoreWeight
             });
           }
         }
       }
     }
 
-    res.status(201).json(newProgram);
+    res.status(201).json({ ...newProgram, weeks: weeks || [] });
   } catch (error) {
     console.error("Error creating program:", error);
     res.status(500).json({ error: "Failed to create program" });
   }
 });
 
-// Update program templates (publish/template flags)
+// Update program published status
 router.patch("/programs/:id/publish", async (req, res) => {
   try {
     const { id } = req.params;
-    const { isTemplate } = req.body;
+    const { isPublished } = req.body;
     
     const [updated] = await db.update(programs)
-      .set({ isTemplate })
+      .set({ isPublished })
       .where(eq(programs.id, id))
       .returning();
       
@@ -110,46 +121,56 @@ router.patch("/programs/:id/publish", async (req, res) => {
 router.put("/programs/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, emoji, description, color, days } = req.body;
+    const { title, emoji, description, color, totalWeeks, weeks } = req.body;
     
+    // Validate if the program exists and is not a system program
     const existingProgram = await db.select().from(programs).where(eq(programs.id, id));
-    if (existingProgram.length === 0) {
-      res.status(404).json({ error: "Program not found" });
-      return;
-    }
+    if (existingProgram.length === 0) { res.status(404).json({ error: "Program not found" }); return; }
+    if (existingProgram[0].isSystem) { res.status(403).json({ error: "Cannot modify system programs" }); return; }
 
+    // Update main program
     const [updatedProgram] = await db.update(programs).set({
-      title, emoji, description, color
+      title, emoji, description, color, totalWeeks
     }).where(eq(programs.id, id)).returning();
 
-    if (days && Array.isArray(days)) {
-      await db.delete(workoutDays).where(eq(workoutDays.programId, id));
-      
-      for (const d of days) {
-        const [newDay] = await db.insert(workoutDays).values({
+    // To properly update weeks/tasks, the easiest approach for a builder is often to drop and recreate them, 
+    // or meticulously diff them. For MVP of the program builder, we delete existing weeks/tasks and re-insert.
+    if (weeks && Array.isArray(weeks)) {
+      await db.delete(programWeeks).where(eq(programWeeks.programId, id));
+      for (const w of weeks) {
+        const weekId = `${id}-w${w.weekNumber}`;
+        await db.insert(programWeeks).values({
+          id: weekId,
           programId: id,
-          dayNumber: d.dayNumber,
-          title: d.title,
-          targetMuscleGroups: d.targetMuscleGroups || []
-        }).returning();
+          weekNumber: w.weekNumber,
+          theme: w.theme,
+          goal: w.goal,
+          psychologyRationale: w.psychologyRationale,
+          dailyJournalPrompt: w.dailyJournalPrompt,
+          weeklyReflectionPrompt: w.weeklyReflectionPrompt
+        });
 
-        if (d.exercises && Array.isArray(d.exercises)) {
-          for (let i = 0; i < d.exercises.length; i++) {
-            const ex = d.exercises[i];
-            await db.insert(workoutDayExercises).values({
-              workoutDayId: newDay.id,
-              exerciseId: ex.exerciseId,
-              sortOrder: i + 1,
-              targetSets: ex.targetSets || 3,
-              targetReps: ex.targetReps || 10,
-              targetRpe: ex.targetRpe || 8
+        if (w.tasks && Array.isArray(w.tasks)) {
+          for (let i = 0; i < w.tasks.length; i++) {
+            const t = w.tasks[i];
+            const taskId = `${weekId}-t${i + 1}`;
+            await db.insert(programTasks).values({
+              id: taskId,
+              weekId,
+              title: t.title,
+              description: t.description,
+              isHabit: t.isHabit,
+              metricCategory: t.metricCategory,
+              metricInputType: t.metricInputType,
+              metricUnitLabel: t.metricUnitLabel,
+              metricScoreWeight: t.metricScoreWeight
             });
           }
         }
       }
     }
 
-    res.json(updatedProgram);
+    res.json({ ...updatedProgram, weeks: weeks || [] });
   } catch (error) {
     console.error("Error updating program:", error);
     res.status(500).json({ error: "Failed to update program" });
@@ -162,10 +183,8 @@ router.delete("/programs/:id", async (req, res) => {
     const { id } = req.params;
     
     const existingProgram = await db.select().from(programs).where(eq(programs.id, id));
-    if (existingProgram.length === 0) {
-      res.status(404).json({ error: "Program not found" });
-      return;
-    }
+    if (existingProgram.length === 0) { res.status(404).json({ error: "Program not found" }); return; }
+    if (existingProgram[0].isSystem) { res.status(403).json({ error: "Cannot delete system programs" }); return; }
 
     await db.delete(programs).where(eq(programs.id, id));
     res.status(204).send();

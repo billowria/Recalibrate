@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { eq, or, and, ilike, ne, sql, inArray, desc } from "drizzle-orm";
-import { db, users, friendships, workoutSessions } from "@workspace/db";
+import { db, users, friendships, dailyLogs } from "@workspace/db";
 
 const router = Router();
 
@@ -124,21 +124,18 @@ router.get("/friends/:userId", async (req, res, next) => {
       inArray(users.id, friendIds)
     );
 
-    // Fetch last active date for each friend (most recent workoutSession startedAt)
-    const lastActiveSessions = await db
-      .selectDistinctOn([workoutSessions.userId], {
-        userId: workoutSessions.userId,
-        startedAt: workoutSessions.startedAt,
+    // Fetch last active date for each friend (most recent daily_log date)
+    const lastActiveLogs = await db
+      .selectDistinctOn([dailyLogs.userId], {
+        userId: dailyLogs.userId,
+        date: dailyLogs.date,
       })
-      .from(workoutSessions)
-      .where(inArray(workoutSessions.userId, friendIds))
-      .orderBy(workoutSessions.userId, desc(workoutSessions.startedAt));
+      .from(dailyLogs)
+      .where(inArray(dailyLogs.userId, friendIds))
+      .orderBy(dailyLogs.userId, desc(dailyLogs.date));
 
     const lastActiveMap = Object.fromEntries(
-      lastActiveSessions.map(session => [
-        session.userId,
-        session.startedAt ? session.startedAt.toISOString().split("T")[0] : null
-      ])
+      lastActiveLogs.map(log => [log.userId, log.date])
     );
 
     // Attach friendship ID, lastActive, and computed level
