@@ -13,12 +13,13 @@ import {
   View,
   Animated as RNAnimated,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, BADGES } from '@/context/AppContext';
 import { useColors } from '@/hooks/useColors';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GlassCard } from '@/components/GlassCard';
+import AvatarUploader from '@/components/AvatarUploader';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { customFetch } from '@workspace/api-client-react';
 import {
@@ -311,11 +312,24 @@ export default function ProfileScreen() {
 
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(profile.name);
+  const [editingBio, setEditingBio] = useState(false);
+  const [bioInput, setBioInput] = useState(profile.bio || '');
   const [wakeInput, setWakeInput] = useState(profile.wakeTime);
   const [bedInput, setBedInput] = useState(profile.bedTime);
   const [notifSettings, setNotifSettings] = useState<NotificationSettings | null>(null);
   const [notifPermGranted, setNotifPermGranted] = useState(false);
   const [userEmail, setUserEmail] = useState('');
+  const [isProfilePublic, setIsProfilePublic] = useState(profile.isProfilePublic ?? true);
+  const userId = useApp().userId;
+
+  // Social links state
+  const [socialLinks, setSocialLinks] = useState<{ instagram: string; snapchat: string; telegram: string }>({
+    instagram: (profile as any).socialLinks?.instagram || '',
+    snapchat: (profile as any).socialLinks?.snapchat || '',
+    telegram: (profile as any).socialLinks?.telegram || '',
+  });
+  const [editingSocialField, setEditingSocialField] = useState<'instagram' | 'snapchat' | 'telegram' | null>(null);
+  const [socialDraft, setSocialDraft] = useState('');
 
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
 
@@ -356,11 +370,60 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleSaveName = () => {
+  const handleSaveName = async () => {
     if (nameInput.trim()) {
-      updateProfile({ name: nameInput.trim() });
+      await updateProfile({ name: nameInput.trim() });
+      if (userId) {
+        customFetch(`/users/${userId}/profile`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name: nameInput.trim() }),
+          headers: { 'Content-Type': 'application/json' },
+        }).catch(console.error);
+      }
     }
     setEditingName(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const handleSaveBio = async () => {
+    await updateProfile({ bio: bioInput.trim() || undefined });
+    if (userId) {
+      customFetch(`/users/${userId}/profile`, {
+        method: 'PATCH',
+        body: JSON.stringify({ bio: bioInput.trim() || null }),
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(console.error);
+    }
+    setEditingBio(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const handleTogglePublicProfile = async () => {
+    const nextVal = !isProfilePublic;
+    setIsProfilePublic(nextVal);
+    await updateProfile({ isProfilePublic: nextVal });
+    if (userId) {
+      customFetch(`/users/${userId}/profile`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isProfilePublic: nextVal }),
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(console.error);
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const handleSaveSocialLinks = async (field: 'instagram' | 'snapchat' | 'telegram', value: string) => {
+    const cleanHandle = value.replace('@', '').trim();
+    const next = { ...socialLinks, [field]: cleanHandle };
+    setSocialLinks(next);
+    setEditingSocialField(null);
+    if (userId) {
+      customFetch(`/users/${userId}/profile`, {
+        method: 'PATCH',
+        body: JSON.stringify({ socialLinks: { instagram: next.instagram || undefined, snapchat: next.snapchat || undefined, telegram: next.telegram || undefined } }),
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(console.error);
+    }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
@@ -488,19 +551,17 @@ export default function ProfileScreen() {
         <View style={styles.identityHeader}>
           {/* Glowing Avatar */}
           <View style={styles.avatarContainer}>
-            <LinearGradient
-              colors={colors.gradients.primaryShort}
-              style={styles.avatarGradientRing}
-            >
-              <View style={[styles.avatarInner, { backgroundColor: colors.surfaceMid }]}>
-                <Text style={styles.avatarEmoji}>🧭</Text>
-              </View>
-            </LinearGradient>
-            
+            <AvatarUploader
+              userId={userId!}
+              currentAvatarUrl={profile.avatarUrl}
+              onUploadSuccess={(url) => updateProfile({ avatarUrl: url })}
+              size={72}
+              editable={true}
+            />
             {/* Level Badge Overlay */}
             <LinearGradient
               colors={colors.gradients.primaryShort}
-              style={styles.levelBadge}
+              style={[styles.levelBadge, { bottom: -4, right: -4 }]}
             >
               <Text style={styles.levelBadgeText}>{currentLevel}</Text>
             </LinearGradient>
@@ -553,6 +614,50 @@ export default function ProfileScreen() {
             {userEmail ? (
               <Text style={[styles.userEmail, { color: colors.textSecondary }]}>{userEmail}</Text>
             ) : null}
+
+            {/* Bio Field */}
+            {editingBio ? (
+              <View style={[styles.nameEditRow, { marginTop: 8 }]}>
+                <TextInput
+                  value={bioInput}
+                  onChangeText={setBioInput}
+                  autoFocus
+                  placeholder="Add a bio..."
+                  placeholderTextColor={colors.textMuted}
+                  style={[
+                    styles.nameInput,
+                    {
+                      color: colors.text,
+                      borderColor: colors.brand.primary,
+                      backgroundColor: colors.surfaceHigh,
+                      flex: 1,
+                    },
+                  ]}
+                  onSubmitEditing={handleSaveBio}
+                />
+                <TouchableOpacity
+                  onPress={handleSaveBio}
+                  style={[styles.saveNameBtn, { backgroundColor: colors.brand.primary }]}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="checkmark" size={16} color="#FFF" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={() => {
+                  setEditingBio(true);
+                  setBioInput(profile.bio || '');
+                }}
+                activeOpacity={0.7}
+                style={[styles.nameRow, { marginTop: 4, marginBottom: 4 }]}
+              >
+                <Text style={[styles.identityName, { color: colors.textSecondary, fontSize: 14, fontStyle: 'italic' }]} numberOfLines={1}>
+                  {profile.bio ? `"${profile.bio}"` : 'Add a bio...'}
+                </Text>
+                <Ionicons name="pencil-outline" size={12} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
             
             <Text style={[styles.xpText, { color: colors.textMuted }]}>
               {totalXP} XP earned
@@ -577,6 +682,78 @@ export default function ProfileScreen() {
             />
           </View>
         </View>
+      </GlassCard>
+
+      {/* ─── SOCIAL LINKS ─── */}
+      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>SOCIAL LINKS</Text>
+      <GlassCard style={styles.sectionCard}>
+        <Text style={[{ fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary, marginBottom: 16, lineHeight: 18 }]}>
+          Share your handles so friends can find you on other platforms.
+        </Text>
+        {(['instagram', 'snapchat', 'telegram'] as const).map((platform) => {
+          const platformConfig = {
+            instagram: { icon: 'instagram', label: 'Instagram', color: '#E1306C' },
+            snapchat: { icon: 'camera', label: 'Snapchat', color: '#FFFC00' },
+            telegram: { icon: 'send', label: 'Telegram', color: '#2AABEE' },
+          } as const;
+          const cfg = platformConfig[platform];
+          const isEditing = editingSocialField === platform;
+          const currentVal = socialLinks[platform];
+          return (
+            <View key={platform}>
+              <View style={[socialLinkStyles.row]}>
+                <View style={[socialLinkStyles.iconWrap, { backgroundColor: cfg.color + '18' }]}>
+                  <Feather name={cfg.icon as any} size={18} color={cfg.color} />
+                </View>
+                {isEditing ? (
+                  <View style={socialLinkStyles.editRow}>
+                    <TextInput
+                      autoFocus
+                      value={socialDraft}
+                      onChangeText={setSocialDraft}
+                      placeholder={`@your${platform}handle`}
+                      placeholderTextColor={colors.textMuted}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      style={[socialLinkStyles.input, { color: colors.text, borderColor: cfg.color, backgroundColor: colors.surfaceHigh }]}
+                      onSubmitEditing={() => handleSaveSocialLinks(platform, socialDraft)}
+                    />
+                    <TouchableOpacity
+                      onPress={() => handleSaveSocialLinks(platform, socialDraft)}
+                      style={[socialLinkStyles.saveBtn, { backgroundColor: cfg.color }]}
+                    >
+                      <Ionicons name="checkmark" size={16} color="#FFF" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => setEditingSocialField(null)}
+                      style={[socialLinkStyles.cancelBtn, { borderColor: colors.border }]}
+                    >
+                      <Ionicons name="close" size={16} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={socialLinkStyles.valueRow}
+                    onPress={() => {
+                      setEditingSocialField(platform);
+                      setSocialDraft(currentVal || '');
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      socialLinkStyles.value,
+                      { color: currentVal ? cfg.color : colors.textMuted, fontFamily: currentVal ? 'Inter_600SemiBold' : 'Inter_400Regular' }
+                    ]}>
+                      {currentVal ? `@${currentVal}` : `Add ${cfg.label}`}
+                    </Text>
+                    <Ionicons name="pencil-outline" size={14} color={colors.textMuted} />
+                  </TouchableOpacity>
+                )}
+              </View>
+              {platform !== 'telegram' && <View style={[styles.settingDivider, { backgroundColor: colors.border, marginVertical: 4 }]} />}
+            </View>
+          );
+        })}
       </GlassCard>
 
       {/* ─── AI COACH ─── */}
@@ -809,9 +986,31 @@ export default function ProfileScreen() {
         />
       </GlassCard>
 
-      {/* ─── NOTIFICATIONS & REMINDERS ─── */}
-      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>RECALIBRATE REMINDERS</Text>
+      {/* ─── SETTINGS & NOTIFICATIONS ─── */}
+      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>SETTINGS & PRIVACY</Text>
       <GlassCard style={styles.sectionCard}>
+        
+        {/* Social Privacy */}
+        <View style={styles.notifMainRow}>
+          <View style={styles.notifIconBg}>
+            <Ionicons name="eye-outline" size={16} color={colors.brand.primaryLight} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.notifLabel, { color: colors.text }]}>Public Profile</Text>
+            <Text style={[styles.notifSubtext, { color: colors.textSecondary }]}>
+              Allow others to find you and view your published protocols
+            </Text>
+          </View>
+          <CustomToggle
+            active={isProfilePublic}
+            onToggle={handleTogglePublicProfile}
+            colors={colors}
+          />
+        </View>
+
+        <View style={[styles.settingDivider, { backgroundColor: colors.border, marginVertical: 8 }]} />
+
+        {/* Push Notifications */}
         <View style={styles.notifMainRow}>
           <View style={styles.notifIconBg}>
             <Ionicons name="notifications-outline" size={16} color={colors.brand.primaryLight} />
@@ -1492,5 +1691,61 @@ const styles = StyleSheet.create({
   },
   themeTabText: {
     fontSize: 13,
+  },
+});
+
+const socialLinkStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 12,
+  },
+  iconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  valueRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  value: {
+    fontSize: 14,
+    flex: 1,
+  },
+  editRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  input: {
+    flex: 1,
+    height: 36,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+  },
+  saveBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
   },
 });

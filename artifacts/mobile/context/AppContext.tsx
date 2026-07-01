@@ -5,6 +5,8 @@ import { setBaseUrl, customFetch } from '@workspace/api-client-react';
 import { AVAILABLE_PROGRAMS, DEFAULT_METRICS, DefaultMetric, Program, PROGRAM_WEEKS } from '@/constants/program';
 import { updateStreakRiskFromLog, registerForPushNotificationsAsync } from '@/notifications/manager';
 
+export type { Program };
+
 const debuggerHost = Constants.expoConfig?.hostUri;
 const host = debuggerHost ? debuggerHost.split(':')[0] : 'localhost';
 const API_URL = `http://${host}:5001/api`;
@@ -26,6 +28,9 @@ export interface UserProfile {
   selectedBuildMetricIds?: string[];
   selectedReduceMetricIds?: string[];
   notificationSettings?: import('@/notifications/manager').NotificationSettings;
+  avatarUrl?: string;
+  bio?: string;
+  isProfilePublic?: boolean;
 }
 
 export interface ProgramProgress {
@@ -239,7 +244,7 @@ const DEFAULT_PROFILE: UserProfile = {
   currentWeek: 1,
   wakeTime: '06:00',
   bedTime: '22:30',
-  startDate: new Date().toISOString().split('T')[0],
+  startDate: getLocalDateString(),
   totalXP: 0,
   highestStreak: 0,
   badges: [],
@@ -248,12 +253,15 @@ const DEFAULT_PROFILE: UserProfile = {
   programProgress: {
     'dopamine-detox-protocol': {
       currentWeek: 1,
-      weekStartDate: new Date().toISOString().split('T')[0],
+      weekStartDate: getLocalDateString(),
       completedWeeks: [],
       resetCount: 0,
     },
   },
   onboardingComplete: false,
+  avatarUrl: undefined,
+  bio: undefined,
+  isProfilePublic: true,
 };
 
 function generateId(): string {
@@ -261,6 +269,13 @@ function generateId(): string {
     const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
+}
+
+export function getLocalDateString(d: Date = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function generateDeterministicId(str1: string, str2: string): string {
@@ -576,7 +591,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     currentFocus: number
   ) => {
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getLocalDateString();
       const progProgress = Object.keys(currentProfile.programProgress).map(programId => ({
         programId,
         currentWeek: currentProfile.programProgress[programId].currentWeek,
@@ -742,7 +757,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             setRelapseLogs(latest.relapseLogs);
             setWeekTaskProgress(latest.weekTaskProgress);
 
-            const todayStr = new Date().toISOString().split('T')[0];
+            const todayStr = getLocalDateString();
             const todayFocus = latest.focusLogs.find((fl: any) => fl.date === todayStr);
             if (todayFocus) {
               setFocusMinutesToday(todayFocus.minutes);
@@ -787,7 +802,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         AsyncStorage.getItem('journalEntries'),
         AsyncStorage.getItem('relapseLogs'),
         AsyncStorage.getItem('weekTaskProgress'),
-        AsyncStorage.getItem(`focusMinutes_${new Date().toISOString().split('T')[0]}`),
+        AsyncStorage.getItem(`focusMinutes_${getLocalDateString()}`),
         AsyncStorage.getItem('availablePrograms'),
         AsyncStorage.getItem('pomodoroSettings'),
       ]);
@@ -806,7 +821,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           merged.programProgress = {
             'dopamine-detox-protocol': {
               currentWeek: merged.currentWeek ?? 1,
-              weekStartDate: merged.startDate ?? new Date().toISOString().split('T')[0],
+              weekStartDate: merged.startDate ?? getLocalDateString(),
               completedWeeks: [],
               resetCount: 0,
             },
@@ -844,26 +859,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     const activeTaskIds = new Set<string>();
+    const todayStr = getLocalDateString();
     for (const programId of profile.activeProgramIds) {
       const prog = availablePrograms.find(p => p.id === programId);
       const progress = profile.programProgress[programId];
-      if (!prog || !progress) continue;
+      if (!prog || !progress || todayStr < progress.weekStartDate) continue;
 
       const weekData = prog.weeks[progress.currentWeek - 1];
       if (!weekData) continue;
 
       for (const task of weekData.tasks) {
-        const isHabitTask = (task as any).isHabit || (task as any).metricCategory;
+        const isHabitTask = (task as any).isHabit === true || (task as any).isHabit === 'true' || !!(task as any).metricCategory;
         if (isHabitTask) {
           activeTaskIds.add(generateDeterministicId(userIdState || 'default', task.id));
         }
       }
     }
 
-    return metrics.filter(m => activeTaskIds.has(m.id));
+    return metrics.filter(m => activeTaskIds.has(m.id) || !(m as any).programId);
   }, [metrics, profile.activeProgramIds, profile.programProgress, availablePrograms, userIdState]);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = getLocalDateString();
   const todayLogs = dailyLogs.filter(l => l.date === today);
   const disciplineScore = calculateDisciplineScore(todayLogs, filteredMetrics, focusMinutesToday);
   const dayScore = computeDayScore(filteredMetrics, todayLogs);
@@ -932,7 +948,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     // Two-Way Sync: if this logged metric is a program habit, update task completion
     if (userIdState) {
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getLocalDateString();
       if (date === todayStr) {
         const isCompleted = value > 0;
         for (const programId of profile.activeProgramIds) {
@@ -1105,7 +1121,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const metricId = generateDeterministicId(userIdState, task.id);
         const value = !wasComplete ? 1 : 0;
         setDailyLogs(prev => {
-          const date = new Date().toISOString().split('T')[0];
+          const date = getLocalDateString();
           const existing = prev.findIndex(l => l.metricId === metricId && l.date === date);
           let next: DailyLog[];
           if (existing >= 0) {
@@ -1130,25 +1146,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Dynamic Habit Injection Effect
   useEffect(() => {
-    if (!userIdState || !profile.activeProgramIds) return;
+    if (!profile.activeProgramIds) return;
 
     let metricsUpdated = false;
     const currentMetrics = [...metrics];
 
+    const todayStr = getLocalDateString();
     for (const programId of profile.activeProgramIds) {
       const prog = availablePrograms.find(p => p.id === programId);
       const progress = profile.programProgress[programId];
-      if (!prog || !progress) continue;
+      if (!prog || !progress || todayStr < progress.weekStartDate) continue;
 
       const weekData = prog.weeks[progress.currentWeek - 1];
       if (!weekData) continue;
 
       for (const task of weekData.tasks) {
-        const isHabitTask = (task as any).isHabit || (task as any).metricCategory;
+        const isHabitTask = (task as any).isHabit === true || (task as any).isHabit === 'true' || !!(task as any).metricCategory;
         if (isHabitTask) {
-          const deterministicId = generateDeterministicId(userIdState, task.id);
-          const alreadyExists = currentMetrics.some(m => m.id === deterministicId);
-          if (!alreadyExists) {
+          const deterministicId = generateDeterministicId(userIdState || 'default', task.id);
+          const existingIdx = currentMetrics.findIndex(m => m.id === deterministicId);
+          if (existingIdx >= 0) {
+            if (!(currentMetrics[existingIdx] as any).programId) {
+              currentMetrics[existingIdx] = { ...currentMetrics[existingIdx], programId: prog.id } as any;
+              metricsUpdated = true;
+            }
+          } else {
             currentMetrics.push({
               id: deterministicId,
               name: task.title,
@@ -1184,12 +1206,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       activeProgramIds: [...profile.activeProgramIds, programId],
       programProgress: {
         ...profile.programProgress,
-        [programId]: { currentWeek: 1, weekStartDate: new Date().toISOString().split('T')[0], completedWeeks: [], resetCount: 0 },
+        [programId]: { currentWeek: 1, weekStartDate: getLocalDateString(), completedWeeks: [], resetCount: 0 },
       },
     };
     
     setProfile(nextProfile);
     await AsyncStorage.setItem('profile', JSON.stringify(nextProfile));
+
+    const programTitle = availablePrograms.find(p => p.id === programId)?.title ?? 'a new program';
+    const newEntry = {
+      id: generateId(),
+      date: getLocalDateString(),
+      prompt: 'Program Started',
+      response: `I started ${programTitle} today.`,
+      tags: ['system', 'program-start'],
+      wordCount: 5,
+    };
+    
+    const nextJournalEntries = [...journalEntries, newEntry];
+    setJournalEntries(nextJournalEntries);
+    await AsyncStorage.setItem('journalEntries', JSON.stringify(nextJournalEntries));
     
     if (userIdState) {
       await syncWithCloud(userIdState, nextProfile, metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday);
@@ -1369,7 +1405,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return { daysTracked: 0, daysJournaled: 0, tasksCompleted: 0, totalTasks: 0, canAdvance: false, shouldRestart: false, daysSinceWeekStart: 0, weekPassThreshold: 5 };
     }
     const weekStart = progress.weekStartDate;
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString();
     const weekDays = datesBetween(weekStart, todayStr);
     const daysSinceWeekStart = weekDays.length - 1;
     const PASS_THRESHOLD = 5;
@@ -1395,7 +1431,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         currentWeek: programId === 'dopamine-detox-protocol' ? newWeek : prev.currentWeek,
         programProgress: {
           ...prev.programProgress,
-          [programId]: { ...progress, currentWeek: newWeek, weekStartDate: new Date().toISOString().split('T')[0], completedWeeks: newCompletedWeeks },
+          [programId]: { ...progress, currentWeek: newWeek, weekStartDate: getLocalDateString(), completedWeeks: newCompletedWeeks },
         },
       };
       AsyncStorage.setItem('profile', JSON.stringify(next));
@@ -1419,7 +1455,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         programProgress: {
           ...prev.programProgress,
-          [programId]: { ...progress, weekStartDate: new Date().toISOString().split('T')[0], resetCount: (progress.resetCount ?? 0) + 1 },
+          [programId]: { ...progress, weekStartDate: getLocalDateString(), resetCount: (progress.resetCount ?? 0) + 1 },
         },
       };
       AsyncStorage.setItem('profile', JSON.stringify(next));
@@ -1553,7 +1589,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setRelapseLogs(latest.relapseLogs);
         setWeekTaskProgress(latest.weekTaskProgress);
 
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = getLocalDateString();
         const todayFocus = latest.focusLogs.find((fl: any) => fl.date === todayStr);
         if (todayFocus) {
           setFocusMinutesToday(todayFocus.minutes);

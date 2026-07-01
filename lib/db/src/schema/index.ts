@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, integer, boolean, real, jsonb, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, boolean, real, jsonb, uuid, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -17,6 +17,14 @@ export const users = pgTable("users", {
   activeProgramIds: jsonb("active_program_ids").$type<string[]>().default([]),
   savedProgramIds: jsonb("saved_program_ids").$type<string[]>().default([]),
   expoPushToken: text("expo_push_token"),
+  avatarUrl: text("avatar_url"),
+  bio: text("bio"),
+  isProfilePublic: boolean("is_profile_public").default(true),
+  socialLinks: jsonb("social_links").$type<{
+    instagram?: string;
+    snapchat?: string;
+    telegram?: string;
+  }>().default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -146,6 +154,18 @@ export const programTasks = pgTable("program_tasks", {
   metricScoreWeight: integer("metric_score_weight"),
 });
 
+// Friendships
+export const friendships = pgTable("friendships", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requesterId: uuid("requester_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  addresseeId: uuid("addressee_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  status: text("status").notNull().default("pending"), // 'pending' | 'accepted' | 'rejected'
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ([
+  unique("friendships_requester_addressee_unique").on(table.requesterId, table.addresseeId),
+]));
+
 // Zod Schemas
 export const insertUserSchema = createInsertSchema(users);
 export const selectUserSchema = createSelectSchema(users);
@@ -179,3 +199,6 @@ export const selectProgramWeekSchema = createSelectSchema(programWeeks);
 
 export const insertProgramTaskSchema = createInsertSchema(programTasks);
 export const selectProgramTaskSchema = createSelectSchema(programTasks);
+
+export const insertFriendshipSchema = createInsertSchema(friendships);
+export const selectFriendshipSchema = createSelectSchema(friendships);

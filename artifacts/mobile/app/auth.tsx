@@ -33,15 +33,17 @@ import AnimatedReanimated, {
   interpolateColor,
   Easing as REasing,
 } from 'react-native-reanimated';
+import { useColors } from '@/hooks/useColors';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
 // ─── Ambient Top Glow ────────────────────────────────────────────────────────
 function AmbientGlow() {
+  const colors = useColors();
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <LinearGradient
-        colors={['rgba(120,80,255,0.28)', 'rgba(80,50,200,0.10)', 'transparent']}
+        colors={[colors.brand.primaryGlow, 'transparent']}
         style={{
           position: 'absolute',
           top: -80,
@@ -52,7 +54,7 @@ function AmbientGlow() {
         }}
       />
       <LinearGradient
-        colors={['rgba(180,80,255,0.12)', 'transparent']}
+        colors={[colors.brand.secondaryGlow, 'transparent']}
         style={{
           position: 'absolute',
           top: 60,
@@ -98,6 +100,7 @@ function AuthInput({
   onSubmitEditing?: () => void;
   inputRef?: React.RefObject<TextInput | null>;
 }) {
+  const colors = useColors();
   const [focused, setFocused] = useState(false);
   const [showPw, setShowPw] = useState(false);
   const borderAnim = useRef(new Animated.Value(0)).current;
@@ -113,22 +116,22 @@ function AuthInput({
 
   const borderColor = borderAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(255,255,255,0.12)', 'rgba(255,255,255,0.50)'],
+    outputRange: [colors.border, colors.borderFocus],
   });
 
   return (
-    <Animated.View style={[darkInputStyles.wrap, { borderColor }]}>
+    <Animated.View style={[darkInputStyles.wrap, { borderColor, backgroundColor: colors.surfaceMid }]}>
       <Ionicons
         name={icon as any}
         size={16}
-        color={focused ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.35)'}
+        color={focused ? colors.brand.primary : colors.textMuted}
         style={{ marginRight: 10 }}
       />
       <TextInput
         ref={inputRef}
-        style={darkInputStyles.input}
+        style={[darkInputStyles.input, { color: colors.text }]}
         placeholder={placeholder}
-        placeholderTextColor="rgba(255,255,255,0.28)"
+        placeholderTextColor={colors.textMuted}
         value={value}
         onChangeText={onChangeText}
         secureTextEntry={secureTextEntry && !showPw}
@@ -138,14 +141,14 @@ function AuthInput({
         onBlur={handleBlur}
         returnKeyType={returnKeyType ?? 'next'}
         onSubmitEditing={onSubmitEditing}
-        selectionColor="rgba(160,100,255,0.9)"
+        selectionColor={colors.brand.primary}
       />
       {secureTextEntry && (
         <TouchableOpacity onPress={() => setShowPw(v => !v)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Ionicons
             name={showPw ? 'eye-off-outline' : 'eye-outline'}
             size={16}
-            color="rgba(255,255,255,0.35)"
+            color={colors.textMuted}
           />
         </TouchableOpacity>
       )}
@@ -190,6 +193,7 @@ function HalfAuthInput({
   onSubmitEditing?: () => void;
   inputRef?: React.RefObject<TextInput | null>;
 }) {
+  const colors = useColors();
   const [focused, setFocused] = useState(false);
   const borderAnim = useRef(new Animated.Value(0)).current;
 
@@ -204,22 +208,22 @@ function HalfAuthInput({
 
   const borderColor = borderAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(255,255,255,0.12)', 'rgba(255,255,255,0.50)'],
+    outputRange: [colors.border, colors.borderFocus],
   });
 
   return (
-    <Animated.View style={[darkInputStyles.wrap, { borderColor, flex: 1 }]}>
+    <Animated.View style={[darkInputStyles.wrap, { borderColor, backgroundColor: colors.surfaceMid, flex: 1 }]}>
       <Ionicons
         name={icon as any}
         size={14}
-        color={focused ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.35)'}
+        color={focused ? colors.brand.primary : colors.textMuted}
         style={{ marginRight: 8 }}
       />
       <TextInput
         ref={inputRef}
-        style={[darkInputStyles.input, { fontSize: 14 }]}
+        style={[darkInputStyles.input, { color: colors.text, fontSize: 14 }]}
         placeholder={placeholder}
-        placeholderTextColor="rgba(255,255,255,0.28)"
+        placeholderTextColor={colors.textMuted}
         value={value}
         onChangeText={onChangeText}
         autoCapitalize="words"
@@ -227,7 +231,7 @@ function HalfAuthInput({
         onBlur={handleBlur}
         returnKeyType={returnKeyType ?? 'next'}
         onSubmitEditing={onSubmitEditing}
-        selectionColor="rgba(160,100,255,0.9)"
+        selectionColor={colors.brand.primary}
       />
     </Animated.View>
   );
@@ -235,25 +239,26 @@ function HalfAuthInput({
 
 // ─── Social Icons Row ─────────────────────────────────────────────────────────
 function SocialIconsRow() {
+  const colors = useColors();
   const socialIcons: { name: any; color: string }[] = [
     { name: 'logo-facebook', color: '#1877F2' },
     { name: 'logo-instagram', color: '#E1306C' },
-    { name: 'logo-apple', color: '#FFFFFF' },
+    { name: 'logo-apple', color: colors.text },
     { name: 'logo-twitter', color: '#1DA1F2' },
   ];
 
   return (
     <View style={socialStyles.container}>
       <View style={socialStyles.orRow}>
-        <View style={socialStyles.line} />
-        <Text style={socialStyles.orText}>or</Text>
-        <View style={socialStyles.line} />
+        <View style={[socialStyles.line, { backgroundColor: colors.border }]} />
+        <Text style={[socialStyles.orText, { color: colors.textMuted }]}>or</Text>
+        <View style={[socialStyles.line, { backgroundColor: colors.border }]} />
       </View>
       <View style={socialStyles.iconsRow}>
         {socialIcons.map((s, i) => (
           <TouchableOpacity
             key={i}
-            style={socialStyles.iconBtn}
+            style={[socialStyles.iconBtn, { backgroundColor: colors.surfaceMid, borderColor: colors.border }]}
             activeOpacity={0.7}
             onPress={() => Alert.alert('Coming Soon', 'Social sign-in is coming in a future update.')}
           >
@@ -287,6 +292,7 @@ const socialStyles = StyleSheet.create({
 export default function AuthScreen() {
   const insets = useSafeAreaInsets();
   const { login } = useApp();
+  const colors = useColors();
 
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [firstName, setFirstName] = useState('');
@@ -461,7 +467,7 @@ export default function AuthScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={authStyles.root}
+      style={[authStyles.root, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       {/* Ambient background glow */}
@@ -475,12 +481,12 @@ export default function AuthScreen() {
         {/* ── Hero: Brand Wordmark ─────────────────────────────────── */}
         <Animated.View style={[authStyles.heroWrap, { opacity: heroAnim, transform: [{ translateY: heroTranslate }] }]}>
           {/* Logo mark */}
-          <View style={authStyles.logoRing}>
-            <View style={authStyles.logoDot} />
+          <View style={[authStyles.logoRing, { borderColor: colors.brand.primaryGlow, backgroundColor: colors.brand.primaryGlowSoft }]}>
+            <View style={[authStyles.logoDot, { backgroundColor: colors.text }]} />
           </View>
 
-          <Text style={authStyles.brandName}>Recalibrate</Text>
-          <Text style={authStyles.brandTagline}>
+          <Text style={[authStyles.brandName, { color: colors.text }]}>Recalibrate</Text>
+          <Text style={[authStyles.brandTagline, { color: colors.textSecondary }]}>
             {mode === 'login' ? 'Welcome back.' : 'Start your journey.'}
           </Text>
         </Animated.View>
@@ -489,20 +495,20 @@ export default function AuthScreen() {
         {quickUser && mode === 'login' && (
           <Animated.View style={{ opacity: formAnim }}>
             <TouchableOpacity
-              style={authStyles.quickChip}
+              style={[authStyles.quickChip, { backgroundColor: colors.surfaceMid, borderColor: colors.border }]}
               onPress={handleQuickAccess}
               activeOpacity={0.75}
             >
-              <View style={authStyles.quickAvatar}>
-                <Text style={authStyles.quickAvatarText}>
+              <View style={[authStyles.quickAvatar, { backgroundColor: colors.brand.primaryGlowSoft, borderColor: colors.brand.primaryGlow }]}>
+                <Text style={[authStyles.quickAvatarText, { color: colors.brand.primary }]}>
                   {quickUser.name.charAt(0).toUpperCase()}
                 </Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={authStyles.quickName}>Continue as {quickUser.name.split(' ')[0]}</Text>
-                <Text style={authStyles.quickEmail}>{quickUser.email}</Text>
+                <Text style={[authStyles.quickName, { color: colors.text }]}>Continue as {quickUser.name.split(' ')[0]}</Text>
+                <Text style={[authStyles.quickEmail, { color: colors.textMuted }]}>{quickUser.email}</Text>
               </View>
-              <Ionicons name="arrow-forward" size={15} color="rgba(255,255,255,0.5)" />
+              <Ionicons name="arrow-forward" size={15} color={colors.textMuted} />
             </TouchableOpacity>
           </Animated.View>
         )}
@@ -571,7 +577,7 @@ export default function AuthScreen() {
               style={authStyles.forgotBtn}
               activeOpacity={0.7}
             >
-              <Text style={authStyles.forgotText}>Forgot Password?</Text>
+              <Text style={[authStyles.forgotText, { color: colors.textSecondary }]}>Forgot Password?</Text>
             </TouchableOpacity>
           )}
 
@@ -581,7 +587,7 @@ export default function AuthScreen() {
               {[1, 2, 3].map(i => (
                 <View
                   key={i}
-                  style={[authStyles.strengthSegment, { backgroundColor: i <= strength.level ? strength.color : 'rgba(255,255,255,0.1)' }]}
+                  style={[authStyles.strengthSegment, { backgroundColor: i <= strength.level ? strength.color : colors.border }]}
                 />
               ))}
               <Text style={[authStyles.strengthLabel, { color: strength.color }]}>{strength.label}</Text>
@@ -606,9 +612,9 @@ export default function AuthScreen() {
 
           {/* Error banner */}
           {!!error && (
-            <View style={authStyles.errorWrap}>
-              <Ionicons name="alert-circle" size={14} color="#ef4444" />
-              <Text style={authStyles.errorText}>{error}</Text>
+            <View style={[authStyles.errorWrap, { backgroundColor: colors.brand.danger + '15', borderColor: colors.brand.danger + '40' }]}>
+              <Ionicons name="alert-circle" size={14} color={colors.brand.danger} />
+              <Text style={[authStyles.errorText, { color: colors.brand.danger }]}>{error}</Text>
             </View>
           )}
 
@@ -616,6 +622,7 @@ export default function AuthScreen() {
           <ExplodingAuthButton
             mode={mode}
             status={authStatus}
+            colors={colors}
             onPress={handleSubmit}
             onExplodeComplete={() => {
               if (nextRouteRef.current) {
@@ -633,9 +640,9 @@ export default function AuthScreen() {
             style={authStyles.switchRow}
             activeOpacity={0.7}
           >
-            <Text style={authStyles.switchText}>
+            <Text style={[authStyles.switchText, { color: colors.textMuted }]}>
               {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
-              <Text style={authStyles.switchLink}>
+              <Text style={[authStyles.switchLink, { color: colors.text }]}>
                 {mode === 'login' ? 'Sign Up' : 'Sign In'}
               </Text>
             </Text>
@@ -837,7 +844,7 @@ const authStyles = StyleSheet.create({
 });
 
 // ─── Component: Exploding Auth Button ────────────────────────────────────────
-function ExplodingAuthButton({ mode, status, onPress, onExplodeComplete }: any) {
+function ExplodingAuthButton({ mode, status, onPress, onExplodeComplete, colors }: any) {
   const width = useSharedValue(SCREEN_W - 48);
   const textOpacity = useSharedValue(1);
   const circleOffset = useSharedValue(0);
@@ -869,7 +876,7 @@ function ExplodingAuthButton({ mode, status, onPress, onExplodeComplete }: any) 
 
   const handlePressIn = () => {
     if (status !== 'idle') return;
-    pillScale.value = withTiming(0.96, { duration: 300 });
+    pillScale.value = withTiming(0.92, { duration: 300 }); // Deeper scale for Soft UI
     holdProgress.value = withTiming(1, { duration: 800, easing: REasing.bezier(0.25, 1, 0.5, 1) }, (finished) => {
       if (finished) {
         runOnJS(triggerSuccessHaptic)();
@@ -930,7 +937,7 @@ function ExplodingAuthButton({ mode, status, onPress, onExplodeComplete }: any) 
       width: 56,
       height: 56,
       borderRadius: 28,
-      backgroundColor: interpolateColor(explodeScale.value, [1, 35], ['#7850FF', '#0D0D0D']),
+      backgroundColor: interpolateColor(explodeScale.value, [1, 35], [colors.brand.primary, colors.background]),
       transform: [
         { rotate: `${rotation.value}deg` },
         { translateX: -circleOffset.value },
@@ -948,7 +955,7 @@ function ExplodingAuthButton({ mode, status, onPress, onExplodeComplete }: any) 
       width: 56,
       height: 56,
       borderRadius: 28,
-      backgroundColor: interpolateColor(explodeScale.value, [1, 35], ['#7850FF', '#0D0D0D']),
+      backgroundColor: interpolateColor(explodeScale.value, [1, 35], [colors.brand.primary, colors.background]),
       transform: [
         { rotate: `${rotation.value}deg` },
         { translateX: circleOffset.value },
@@ -965,10 +972,10 @@ function ExplodingAuthButton({ mode, status, onPress, onExplodeComplete }: any) 
       right: 0,
       top: 0,
       bottom: 0,
-      borderRadius: width.value > 60 ? 20 : 28,
-      backgroundColor: '#1E1E1E',
+      borderRadius: width.value > 60 ? colors.radius2.pill : 28,
+      backgroundColor: colors.surfaceMid,
       borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.05)',
+      borderColor: colors.borderSubtle,
       opacity: width.value > 60 ? 1 : 0,
       overflow: 'hidden',
     };
@@ -981,7 +988,6 @@ function ExplodingAuthButton({ mode, status, onPress, onExplodeComplete }: any) 
       top: 0,
       bottom: 0,
       width: `${holdProgress.value * 100}%` as any,
-      backgroundColor: '#7850FF',
     };
   });
 
@@ -998,8 +1004,15 @@ function ExplodingAuthButton({ mode, status, onPress, onExplodeComplete }: any) 
         >
           {/* Main Dark Pill Background */}
           <AnimatedReanimated.View style={pillStyle}>
-             {/* Progressive Fill inside Pill */}
-             <AnimatedReanimated.View style={fillStyle} />
+             {/* Progressive Fill inside Pill with Gradient */}
+             <AnimatedReanimated.View style={fillStyle}>
+                <LinearGradient
+                  colors={colors.gradients.primaryShort}
+                  start={[0, 0]}
+                  end={[1, 1]}
+                  style={{ width: SCREEN_W - 48, height: '100%' }} // Fixed gradient width so it doesn't squish
+                />
+             </AnimatedReanimated.View>
           </AnimatedReanimated.View>
 
           {/* Splitting Balls (visible only when shrunk) */}
@@ -1008,7 +1021,7 @@ function ExplodingAuthButton({ mode, status, onPress, onExplodeComplete }: any) 
 
           {/* Text */}
           <AnimatedReanimated.Text
-            style={[authStyles.ctaText, { color: '#FFFFFF', opacity: textOpacity, position: 'absolute', width: '100%', textAlign: 'center', top: 18 }]}
+            style={[authStyles.ctaText, { color: colors.text, opacity: textOpacity, position: 'absolute', width: '100%', textAlign: 'center', top: 18 }]}
           >
             {mode === 'login' ? 'Hold to Sign in' : 'Hold to Register'}
           </AnimatedReanimated.Text>

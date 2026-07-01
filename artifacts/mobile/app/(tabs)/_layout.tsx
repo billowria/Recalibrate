@@ -9,7 +9,13 @@ import { Platform, StyleSheet, View, Pressable, useColorScheme } from "react-nat
 import { useColors } from "@/hooks/useColors";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from 'expo-haptics';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, Easing, interpolate, Extrapolation } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, interpolate, Extrapolation } from 'react-native-reanimated';
+import { configureReanimatedLogger, ReanimatedLogLevel } from 'react-native-reanimated';
+
+configureReanimatedLogger({
+  level: ReanimatedLogLevel.warn,
+  strict: false,
+});
 
 function NativeTabLayout() {
   return (
@@ -33,6 +39,10 @@ function NativeTabLayout() {
       <NativeTabs.Trigger name="profile">
         <Icon sf={{ default: "person", selected: "person.fill" }} />
         <Label>Profile</Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="friends">
+        <Icon sf={{ default: "person.2", selected: "person.2.fill" }} />
+        <Label>Social</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -102,6 +112,7 @@ const TabBarButton = ({
   else if (routeName === "track") iconName = "bar-chart";
   else if (routeName === "journal") iconName = "book";
   else if (routeName === "profile") iconName = "person";
+  else if (routeName === "friends") iconName = "people";
 
   const tintColor = isFocused ? colors.primaryForeground : colors.textMuted;
   const isIOS = Platform.OS === 'ios';
@@ -132,7 +143,8 @@ const TabBarButton = ({
               routeName === "program" ? (isFocused ? "calendar.badge.clock" : "calendar") :
               routeName === "track" ? (isFocused ? "chart.bar.fill" : "chart.bar") :
               routeName === "journal" ? (isFocused ? "book.fill" : "book") :
-              (isFocused ? "person.fill" : "person") as any
+              routeName === "profile" ? (isFocused ? "person.fill" : "person") :
+              (isFocused ? "person.2.fill" : "person.2") as any
             }
             tintColor={tintColor} 
             size={22} 
@@ -230,6 +242,7 @@ function ClassicTabLayout() {
       <Tabs.Screen name="track" options={{ title: "Track" }} />
       <Tabs.Screen name="journal" options={{ title: "Journal" }} />
       <Tabs.Screen name="profile" options={{ title: "Profile" }} />
+      <Tabs.Screen name="friends" options={{ title: "Social" }} />
     </Tabs>
   );
 }

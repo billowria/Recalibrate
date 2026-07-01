@@ -1,6 +1,6 @@
 import { Router } from "express";
 import crypto from "crypto";
-import { eq } from "drizzle-orm";
+import { eq, ilike, ne, or, sql, inArray, count } from "drizzle-orm";
 import {
   db,
   users,
@@ -10,12 +10,22 @@ import {
   relapseLogs,
   programProgress,
   weekTaskProgress,
-  focusLogs
+  focusLogs,
+  programs,
+  friendships
 } from "@workspace/db";
 import { RegisterUserBody, SyncUserDataBody, LoginUserBody, UpdatePushTokenBody } from "@workspace/api-zod";
 import { Expo } from "expo-server-sdk";
+import { createClient } from "@supabase/supabase-js";
 
 const expo = new Expo();
+
+// Supabase client for Storage uploads
+const supabaseUrl = process.env.SUPABASE_URL || "";
+const supabaseServiceKey = process.env.SUPABASE_SECRET_KEY || "";
+const supabase = (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== "your_secret_key_here")
+  ? createClient(supabaseUrl, supabaseServiceKey)
+  : null;
 
 const hashPassword = (password: string) => {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -171,7 +181,9 @@ router.post("/users/login", async (req, res, next) => {
         highestStreak: userRecord.highestStreak || 0,
         onboardingComplete: userRecord.onboardingComplete || false,
         activeProgramIds: userRecord.activeProgramIds || [],
-        savedProgramIds: userRecord.savedProgramIds || []
+        savedProgramIds: userRecord.savedProgramIds || [],
+        avatarUrl: userRecord.avatarUrl || null,
+        bio: userRecord.bio || null,
       }
     });
   } catch (error) {
@@ -221,7 +233,9 @@ router.get("/users/:userId/data", async (req, res, next) => {
         highestStreak: profileRecord.highestStreak || 0,
         onboardingComplete: profileRecord.onboardingComplete || false,
         activeProgramIds: profileRecord.activeProgramIds || [],
-        savedProgramIds: profileRecord.savedProgramIds || []
+        savedProgramIds: profileRecord.savedProgramIds || [],
+        avatarUrl: profileRecord.avatarUrl || null,
+        bio: profileRecord.bio || null,
       },
       metrics: dbMetrics.map((m) => ({
         id: m.id,
@@ -548,6 +562,255 @@ router.post("/users/:userId/test-push", async (req, res, next) => {
     }
 
     res.json({ success: true, message: "Push sent successfully" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /api/users/:userId/profile
+ * Update profile fields (name, bio, wakeTime, bedTime, isProfilePublic)
+ */
+router.patch("/users/:userId/profile", async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const { name, bio, wakeTime, bedTime, isProfilePublic, socialLinks } = req.body;
+
+    const updateFields: Record<string, any> = { updatedAt: new Date() };
+    if (name !== undefined) updateFields.name = name;
+    if (bio !== undefined) updateFields.bio = bio;
+    if (wakeTime !== undefined) updateFields.wakeTime = wakeTime;
+    if (bedTime !== undefined) updateFields.bedTime = bedTime;
+    if (isProfilePublic !== undefined) updateFields.isProfilePublic = isProfilePublic;
+    if (socialLinks !== undefined) updateFields.socialLinks = socialLinks;
+
+    const [updated] = await db.update(users)
+      .set(updateFields)
+      .where(eq(users.id, userId))
+      .returning();
+
+    if (!updated) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    res.json({
+      name: updated.name,
+      bio: updated.bio || null,
+      avatarUrl: updated.avatarUrl || null,
+      wakeTime: updated.wakeTime,
+      bedTime: updated.bedTime,
+      isProfilePublic: updated.isProfilePublic ?? true,
+      socialLinks: updated.socialLinks || {},
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/users/:userId/avatar
+ * Upload a profile photo to Supabase Storage
+ * Expects multipart/form-data or base64 JSON body { imageBase64, contentType }
+ */
+router.post("/users/:userId/avatar", async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    if (!supabase) {
+      res.status(503).json({ error: "Storage not configured. Set SUPABASE_URL and SUPABASE_SECRET_KEY." });
+      return;
+    }
+
+    const { imageBase64, contentType } = req.body;
+    if (!imageBase64) {
+      res.status(400).json({ error: "imageBase64 is required" });
+      return;
+    }
+
+    const fileExt = (contentType || "image/jpeg").split("/")[1] || "jpg";
+    const fileName = `${userId}-${Date.now()}.${fileExt}`;
+    const fileBuffer = Buffer.from(imageBase64, "base64");
+
+    const { data, error: uploadError } = await supabase.storage
+      .from("avatars")
+      .upload(fileName, fileBuffer, {
+        contentType: contentType || "image/jpeg",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error("Avatar upload error:", uploadError);
+      res.status(500).json({ error: "Failed to upload avatar", detail: uploadError.message });
+      return;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from("avatars")
+      .getPublicUrl(fileName);
+
+    const publicUrl = urlData.publicUrl;
+
+    // Save to DB
+    await db.update(users)
+      .set({ avatarUrl: publicUrl, updatedAt: new Date() })
+      .where(eq(users.id, userId));
+
+    res.json({ avatarUrl: publicUrl });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/users/:userId/public-profile
+ * Returns a public profile view with stats, programs, badges
+ */
+router.get("/users/:userId/public-profile", async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    const [userRecord] = await db.select().from(users).where(eq(users.id, userId));
+    if (!userRecord) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    // Run all queries in parallel for performance
+    const [userProgramProgress, publishedPrograms, daysResult, journalResult, avgScoreResult, friendCountResult] = await Promise.all([
+      // Program progress
+      db.select().from(programProgress).where(eq(programProgress.userId, userId)),
+
+      // Published programs by this user
+      db.select().from(programs).where(eq(programs.authorId, userId)),
+
+      // Count distinct days tracked
+      db.execute(
+        sql`SELECT COUNT(DISTINCT date) as days FROM daily_logs WHERE user_id = ${userId}`
+      ),
+
+      // Count journal entries
+      db.execute(
+        sql`SELECT COUNT(*) as count FROM journal_entries WHERE user_id = ${userId}`
+      ),
+
+      // 7-day rolling average score: avg of daily log values per day scaled to 0-100
+      // Each day's score = sum(value * score_weight) / sum(score_weight) * 100
+      // We simplify to avg of all logged values in last 7 days as a proxy
+      db.execute(
+        sql`SELECT
+          ROUND(
+            CAST(AVG(dl.value / GREATEST(m.score_weight, 1) * 100) AS numeric)
+          , 1) as avg_score
+        FROM daily_logs dl
+        JOIN metrics m ON m.id = dl.metric_id
+        WHERE dl.user_id = ${userId}
+          AND dl.date >= TO_CHAR(NOW() - INTERVAL '7 days', 'YYYY-MM-DD')
+          AND m.category != 'reduce'`
+      ),
+
+      // Friend count (accepted friendships)
+      db.execute(
+        sql`SELECT COUNT(*) as friend_count FROM friendships
+        WHERE status = 'accepted'
+          AND (requester_id = ${userId} OR addressee_id = ${userId})`
+      ),
+    ]);
+
+    const daysTracked = Number(daysResult.rows[0]?.days) || 0;
+    const journalCount = Number(journalResult.rows[0]?.count) || 0;
+    const averageScore = Number(avgScoreResult.rows[0]?.avg_score) || 0;
+    const friendCount = Number(friendCountResult.rows[0]?.friend_count) || 0;
+
+    // Compute level from XP (matches client formula: level = floor(sqrt(totalXP / 100)) + 1)
+    const totalXP = userRecord.totalXP || 0;
+    const level = Math.floor(Math.sqrt(totalXP / 100)) + 1;
+
+    // Count completed programs (all weeks done)
+    const completedChallenges = userProgramProgress.filter(p => {
+      const prog = publishedPrograms.find(pr => pr.id === p.programId);
+      const totalWeeks = prog?.totalWeeks || 0;
+      return totalWeeks > 0 && (p.completedWeeks || []).length >= totalWeeks;
+    }).length;
+
+    res.json({
+      id: userRecord.id,
+      name: userRecord.name,
+      avatarUrl: userRecord.avatarUrl || null,
+      bio: userRecord.bio || null,
+      socialLinks: userRecord.socialLinks || {},
+      isProfilePublic: userRecord.isProfilePublic ?? true,
+      totalXP,
+      level,
+      highestStreak: userRecord.highestStreak || 0,
+      averageScore,
+      startDate: userRecord.startDate,
+      daysTracked,
+      journalCount,
+      friendCount,
+      completedChallenges,
+      activeProgramIds: userRecord.activeProgramIds || [],
+      programProgress: userProgramProgress.map(p => ({
+        programId: p.programId,
+        currentWeek: p.currentWeek,
+        completedWeeks: p.completedWeeks || [],
+        resetCount: p.resetCount || 0,
+      })),
+      publishedPrograms: publishedPrograms.map(p => ({
+        id: p.id,
+        title: p.title,
+        emoji: p.emoji,
+        description: p.description,
+        totalWeeks: p.totalWeeks,
+        color: p.color,
+        isPublished: p.isPublished,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/users/search?q=&limit=20
+ * Search users by name or email
+ */
+router.get("/users/search", async (req, res, next) => {
+  try {
+    const q = (req.query.q as string || "").trim();
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    const excludeUserId = req.query.excludeUserId as string;
+
+    if (!q || q.length < 2) {
+      res.json({ users: [] });
+      return;
+    }
+
+    const searchPattern = `%${q}%`;
+
+    let conditions = or(
+      ilike(users.name, searchPattern),
+      ilike(users.email, searchPattern)
+    );
+
+    // Exclude the searching user from results
+    if (excludeUserId) {
+      conditions = sql`(${conditions}) AND ${users.id} != ${excludeUserId}`;
+    }
+
+    const results = await db.select({
+      id: users.id,
+      name: users.name,
+      avatarUrl: users.avatarUrl,
+      bio: users.bio,
+      totalXP: users.totalXP,
+      highestStreak: users.highestStreak,
+      activeProgramIds: users.activeProgramIds,
+    }).from(users)
+      .where(conditions as any)
+      .limit(limit);
+
+    res.json({ users: results });
   } catch (error) {
     next(error);
   }
