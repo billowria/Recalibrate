@@ -2,111 +2,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import Constants from 'expo-constants';
 import { setBaseUrl, customFetch } from '@workspace/api-client-react';
-import { AVAILABLE_PROGRAMS, DEFAULT_METRICS, DefaultMetric, Program, PROGRAM_WEEKS } from '@/constants/program';
-import { updateStreakRiskFromLog, registerForPushNotificationsAsync } from '@/notifications/manager';
-
-export type { Program };
+import { registerForPushNotificationsAsync } from '@/notifications/manager';
 
 const debuggerHost = Constants.expoConfig?.hostUri;
 const host = debuggerHost ? debuggerHost.split(':')[0] : 'localhost';
 const API_URL = `http://${host}:5001/api`;
 setBaseUrl(API_URL);
-
-export interface UserProfile {
-  name: string;
-  currentWeek: number;
-  wakeTime: string;
-  bedTime: string;
-  startDate: string;
-  totalXP: number;
-  highestStreak: number;
-  badges: string[];
-  activeProgramIds: string[];
-  savedProgramIds: string[];
-  programProgress: Record<string, ProgramProgress>;
-  onboardingComplete?: boolean;
-  selectedBuildMetricIds?: string[];
-  selectedReduceMetricIds?: string[];
-  notificationSettings?: import('@/notifications/manager').NotificationSettings;
-  avatarUrl?: string;
-  bio?: string;
-  isProfilePublic?: boolean;
-}
-
-export interface ProgramProgress {
-  currentWeek: number;
-  weekStartDate: string;
-  completedWeeks: number[];
-  resetCount: number;
-}
-
-export interface TrackedMetric extends DefaultMetric {
-  isCustom?: boolean;
-  implementationIntention?: string;
-  programId?: string; // set if this metric was injected by a program
-}
-
-export interface HabitContext {
-  // For reduction habits (smoking, alcohol, junk food…)
-  trigger?: 'stress' | 'boredom' | 'social' | 'habit' | 'craving' | 'other';
-  setting?: 'home' | 'work' | 'social' | 'commute' | 'other';
-  intensity?: number; // 1–5: how strong the urge was
-  // For build habits (workout, deep work…)
-  quality?: number; // 1–5: how good the session felt
-  note?: string;   // short freeform note
-}
-
-export interface DailyLog {
-  id: string;
-  metricId: string;
-  date: string;
-  value: number;
-  note?: string;
-  context?: HabitContext;
-}
-
-export interface JournalEntry {
-  id: string;
-  date: string;
-  prompt: string;
-  response: string;
-  // Freeform second entry (personal reflection beyond prompt)
-  freeResponse?: string;
-  // Replaced mood/energy with richer program context
-  programContext?: {
-    missedTaskIds?: string[];
-    hitTaskIds?: string[];
-    programId?: string;
-  };
-  tags?: string[];
-  wordCount?: number;
-  // Set to true for Sunday weekly reflections (replaces daily prompt)
-  isWeeklyReflection?: boolean;
-}
-
-export interface PomodoroSettings {
-  workMinutes: number;   // default 25
-  shortBreak: number;    // default 5
-  longBreak: number;     // default 15
-}
-
-export interface RelapseLog {
-  id: string;
-  date: string;
-  metricId: string;
-  metricName: string;
-  triggerCategory: string;
-  triggerReflection: string;
-  nextAction: string;
-  compassionStatement?: string;
-}
-
-export interface WeekTaskProgress {
-  weekNumber: number;
-  taskId: string;
-  completed: boolean;
-  programId?: string;
-}
 
 export interface Badge {
   id: string;
@@ -116,24 +17,22 @@ export interface Badge {
   requirement: string;
 }
 
-export interface CorrelationInsight {
+export interface TrackedMetric {
   id: string;
-  icon: string;
-  title: string;
-  body: string;
-  type: 'correlation' | 'streak' | 'trend' | 'motivation';
-  color: string;
+  name: string;
+  category: string;
+  inputType: string;
+  unitLabel?: string;
+  implementationIntention?: string;
+  emoji?: string;
 }
 
-export interface WeekGatingStatus {
-  daysTracked: number;
-  daysJournaled: number;
-  tasksCompleted: number;
-  totalTasks: number;
-  canAdvance: boolean;
-  shouldRestart: boolean;
-  daysSinceWeekStart: number;
-  weekPassThreshold: number;
+export interface DailyLog {
+  id: string;
+  metricId: string;
+  value: number;
+  date: string;
+  note?: string | null;
 }
 
 export const BADGES: Badge[] = [
@@ -143,463 +42,253 @@ export const BADGES: Badge[] = [
   { id: 'streak-14', emoji: '💪', name: 'Two Weeks Strong', description: '14-day streak', requirement: 'streak-14' },
   { id: 'streak-30', emoji: '🏆', name: 'Unstoppable', description: '30-day streak', requirement: 'streak-30' },
   { id: 'perfect-day', emoji: '⭐', name: 'Perfect Day', description: 'Score 100% in one day', requirement: 'score-100' },
-  { id: 'deep-work', emoji: '📚', name: 'Deep Work', description: 'Complete a 90-min session', requirement: 'focus-90' },
+  { id: 'deep-work', emoji: '📚', name: 'Deep Work', description: 'Complete a 90-min Pomodoro session', requirement: 'focus-90' },
   { id: 'journal-5', emoji: '📖', name: 'Reflective', description: '5 journal entries', requirement: 'journal-5' },
   { id: 'journal-20', emoji: '💎', name: 'Philosopher', description: '20 journal entries', requirement: 'journal-20' },
-  { id: 'week-complete', emoji: '🎉', name: 'Week Complete', description: 'Finish a full program week', requirement: 'week-done' },
+  { id: 'week-complete', emoji: '🎉', name: 'Week Complete', description: 'Finish a full week', requirement: 'week-done' },
   { id: 'halfway', emoji: '👏', name: 'Halfway Hero', description: 'Complete Week 4', requirement: 'week-4' },
   { id: 'protocol-finish', emoji: '🏁', name: 'Protocol Master', description: 'Complete Week 8', requirement: 'week-8' },
   { id: 'returning', emoji: '🙊', name: 'Back on Track', description: 'Log after a relapse', requirement: 'post-relapse-log' },
   { id: 'early-riser', emoji: '🌅', name: 'Early Riser', description: 'Wake on time 5 days', requirement: 'wake-5' },
   { id: 'hydrated', emoji: '💧', name: 'Hydrated', description: 'Track water 5 days', requirement: 'water-5' },
-  { id: 'grace-used', emoji: '🌿', name: 'Grace Day', description: 'Used a grace day and came back', requirement: 'grace-day' },
 ];
 
-export interface ActivityItem {
+export interface Exercise {
   id: string;
-  type: 'habit' | 'journal' | 'focus' | 'task' | 'relapse';
+  userId?: string | null;
+  name: string;
+  muscleGroup: string;
+  equipment?: string | null;
+}
+
+export interface WorkoutDayExercise {
+  id: string;
+  workoutDayId: string;
+  exerciseId: string;
+  sortOrder: number;
+  targetSets: number;
+  targetReps: number;
+  targetRpe?: number | null;
+}
+
+export interface WorkoutDay {
+  id: string;
+  programId: string;
+  dayNumber: number;
+  title: string;
+  targetMuscleGroups: string[];
+}
+
+export interface Program {
+  id: string;
+  userId?: string | null;
+  title: string;
+  description?: string | null;
+  isTemplate: boolean;
+  color: string;
   emoji: string;
-  text: string;
-  time: string;
+  totalWeeks?: number;
+  weeks?: any[];
+}
+
+export interface WorkoutSession {
+  id: string;
+  userId: string;
+  workoutDayId?: string | null;
+  startedAt: string;
+  completedAt?: string | null;
+  volumeScore: number;
+}
+
+export interface ExerciseLog {
+  id: string;
+  workoutSessionId: string;
+  exerciseId: string;
+  setNumber: number;
+  weight: number;
+  reps: number;
+  rpe?: number | null;
+  isPr: boolean;
+  createdAt?: string;
+}
+
+export interface Journal {
+  id: string;
+  userId: string;
   date: string;
-  xp?: number;
+  content: string;
+  mood?: string | null;
+}
+
+export interface UserProfile {
+  name: string;
+  wakeTime: string;
+  bedTime: string;
+  startDate: string;
+  totalXP: number;
+  highestStreak: number;
+  activeProgramIds: string[];
+  savedProgramIds: string[];
+  onboardingComplete?: boolean;
+  avatarUrl?: string;
+  bio?: string;
+  isProfilePublic?: boolean;
+  badges?: string[];
+  programProgress?: any;
+  currentWeek?: number;
+  selectedBuildMetricIds?: string[];
+  selectedReduceMetricIds?: string[];
+}
+
+const DEFAULT_PROFILE: UserProfile = {
+  name: 'Athlete',
+  wakeTime: '06:00',
+  bedTime: '22:30',
+  startDate: new Date().toISOString().split('T')[0],
+  totalXP: 0,
+  highestStreak: 0,
+  activeProgramIds: ['ppl-split-template'],
+  savedProgramIds: ['ppl-split-template'],
+  onboardingComplete: false,
+  badges: [],
+  programProgress: {},
+  currentWeek: 1
+};
+
+export interface PomodoroSettings {
+  workMinutes: number;
+  shortBreak: number;
+  longBreak: number;
 }
 
 interface AppContextType {
   profile: UserProfile;
-  metrics: TrackedMetric[];
-  dailyLogs: DailyLog[];
-  journalEntries: JournalEntry[];
-  relapseLogs: RelapseLog[];
-  weekTaskProgress: WeekTaskProgress[];
-  disciplineScore: number;
-  totalXP: number;
+  exercises: Exercise[];
+  programs: Program[];
+  workoutDays: WorkoutDay[];
+  workoutDayExercises: WorkoutDayExercise[];
+  workoutSessions: WorkoutSession[];
+  exerciseLogs: ExerciseLog[];
+  journals: Journal[];
+  userIdState: string | null;
+  currentWorkoutSession: WorkoutSession | null;
+  themeMode: 'system' | 'light' | 'dark';
+  setThemeMode: (mode: 'system' | 'light' | 'dark') => Promise<void>;
+  updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
+  login: (userId: string) => Promise<void>;
+  logout: () => Promise<void>;
+  registerAndSync: (profile: UserProfile) => Promise<void>;
+  startWorkoutSession: (workoutDayId: string) => Promise<string>;
+  logExerciseSet: (exerciseId: string, setNumber: number, weight: number, reps: number, rpe?: number | null) => Promise<void>;
+  finishWorkoutSession: () => Promise<void>;
+  cancelWorkoutSession: () => Promise<void>;
+  addJournal: (content: string, mood?: string | null) => Promise<void>;
+  createCustomProgram: (
+    programData: Omit<Program, 'id' | 'isTemplate'>, 
+    days: { title: string; dayNumber: number; targetMuscleGroups: string[]; exercises: { exerciseId: string; targetSets: number; targetReps: number; targetRpe?: number }[] }[]
+  ) => Promise<any>;
+  enrollProgram: (programId: string) => Promise<void>;
+  unenrollProgram: (programId: string) => Promise<void>;
   currentStreak: number;
-  graceStreakActive: boolean;
   highestStreak: number;
   currentLevel: number;
   levelProgress: number;
   levelMax: number;
-  badges: string[];
-  dayScore: number;
-  completionPct: number;
+  // Legacy / Stub compatibility properties
+  totalXP: number;
+  userId: string | null;
   availablePrograms: Program[];
-  createCustomProgram: (programData: Omit<Program, 'id' | 'isSystem'>) => Promise<any>;
-  updateCustomProgram: (programId: string, updates: Partial<Program>) => Promise<any>;
-  deleteCustomProgram: (programId: string) => Promise<void>;
-  publishProgram: (programId: string, isPublished: boolean) => Promise<any>;
-  correlationInsights: CorrelationInsight[];
-  updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
-  logMetric: (metricId: string, date: string, value: number, note?: string, context?: HabitContext) => Promise<void>;
-  getLogForDate: (metricId: string, date: string) => DailyLog | undefined;
-  getLogsForDate: (date: string) => DailyLog[];
-  getLogsForMetric: (metricId: string, days: number) => DailyLog[];
-  addJournalEntry: (entry: Omit<JournalEntry, 'id' | 'wordCount' | 'tags'>, freeResponse?: string, manualTags?: string[]) => Promise<void>;
-  getJournalEntryForDate: (date: string) => JournalEntry | undefined;
-  addRelapseLog: (log: Omit<RelapseLog, 'id'>) => Promise<void>;
-  toggleWeekTask: (weekNumber: number, taskId: string, programId?: string) => Promise<void>;
-  isWeekTaskComplete: (weekNumber: number, taskId: string, programId?: string) => boolean;
-  addCustomMetric: (metric: Omit<TrackedMetric, 'id' | 'isDefault' | 'isCustom'>) => Promise<void>;
-  deleteMetric: (metricId: string) => Promise<void>;
-  focusMinutesToday: number;
-  addFocusMinutes: (minutes: number) => Promise<void>;
-  addXP: (amount: number) => void;
-  getStreak: () => number;
-  getStreakRisk: () => boolean;
-  getMissedDays: (days: number) => string[];
-  getRecentActivity: (count: number) => ActivityItem[];
-  getMetricStreak: (metricId: string) => number;
-  getMetricConsistency: (metricId: string, days: number) => number;
-  enrollProgram: (programId: string) => Promise<void>;
-  unenrollProgram: (programId: string) => Promise<void>;
+  updateCustomProgram: (programId: string, updates: Partial<Program>, days: any[]) => Promise<void>;
   toggleSavedProgram: (programId: string) => Promise<void>;
-  advanceProgramWeek: (programId: string) => Promise<void>;
-  restartProgramWeek: (programId: string) => Promise<void>;
-  getWeekGatingStatus: (programId: string) => WeekGatingStatus;
-  getProgramProgress: (programId: string) => ProgramProgress | undefined;
+  deleteCustomProgram: (programId: string) => Promise<void>;
+  publishProgram: (programId: string) => Promise<void>;
+  pomodoroSettings: PomodoroSettings;
+  setPomodoroSettings: (updates: Partial<PomodoroSettings>) => Promise<void>;
+  addFocusMinutes: (mins: number) => Promise<void>;
+  focusMinutesToday: number;
+  dailyLogs: any[];
+  journalEntries: any[];
+  metrics: any[];
+  relapseLogs: any[];
+  getJournalEntryForDate: (date: string) => any;
+  getLogsForDate: (date: string) => any[];
+  disciplineScore: number;
+  correlationInsights: any[];
+  addRelapseLog: (payload: any) => Promise<void>;
+  badges: string[];
+  getProgramProgress: (programId: string) => any;
   exportData: () => string;
   deleteAllData: () => Promise<void>;
-  logout: () => Promise<void>;
-  login: (userId: string) => Promise<void>;
-  // Pomodoro
-  pomodoroSettings: PomodoroSettings;
-  setPomodoroSettings: (s: Partial<PomodoroSettings>) => Promise<void>;
-  // Theme Mode
-  themeMode: 'system' | 'light' | 'dark';
-  setThemeMode: (mode: 'system' | 'light' | 'dark') => Promise<void>;
-  userId: string | null;
-}
-
-function xpForLevel(level: number) { return Math.floor(level * level * 100 + level * 50); }
-function levelFromXP(xp: number) {
-  let level = 1, needed = 100;
-  while (xp >= needed) { xp -= needed; level++; needed = xpForLevel(level); }
-  return { level, progress: xp, max: needed };
+  addJournalEntry?: (content: string, mood?: string | null) => Promise<void>;
+  addXP?: (amount: number) => Promise<void>;
+  weekTaskProgress?: any[];
+  isWeekTaskComplete?: (programId: string, week: number, taskId: string) => boolean;
+  getWeekGatingStatus?: (programId: string, week: number) => any;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const DEFAULT_PROFILE: UserProfile = {
-  name: '',
-  currentWeek: 1,
-  wakeTime: '06:00',
-  bedTime: '22:30',
-  startDate: getLocalDateString(),
-  totalXP: 0,
-  highestStreak: 0,
-  badges: [],
-  activeProgramIds: ['dopamine-detox-protocol'],
-  savedProgramIds: ['dopamine-detox-protocol'],
-  programProgress: {
-    'dopamine-detox-protocol': {
-      currentWeek: 1,
-      weekStartDate: getLocalDateString(),
-      completedWeeks: [],
-      resetCount: 0,
-    },
-  },
-  onboardingComplete: false,
-  avatarUrl: undefined,
-  bio: undefined,
-  isProfilePublic: true,
-};
-
 function generateId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
 }
 
-export function getLocalDateString(d: Date = new Date()): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+function getLocalDateString(): string {
+  return new Date().toISOString().split('T')[0];
 }
 
-function generateDeterministicId(str1: string, str2: string): string {
-  const hashStr = str1 + '|' + str2;
-  let hash = 0;
-  for (let i = 0; i < hashStr.length; i++) {
-    const char = hashStr.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  let hex = Math.abs(hash).toString(16).padEnd(32, 'b');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+function levelFromXP(xp: number) {
+  const level = Math.floor(Math.sqrt(xp / 100)) + 1;
+  const currentLevelXP = Math.pow(level - 1, 2) * 100;
+  const nextLevelXP = Math.pow(level, 2) * 100;
+  const max = nextLevelXP - currentLevelXP;
+  const progress = xp - currentLevelXP;
+  return { level, progress, max };
 }
-
-function calculateDisciplineScore(
-  todayLogs: DailyLog[],
-  metrics: TrackedMetric[],
-  focusMinutes: number
-): number {
-  const logsByMetric: Record<string, DailyLog> = {};
-  for (const log of todayLogs) { logsByMetric[log.metricId] = log; }
-  let totalWeight = 0, earnedScore = 0;
-  for (const metric of metrics) {
-    const log = logsByMetric[metric.id];
-    const weight = metric.scoreWeight;
-    totalWeight += weight;
-    if (!log) continue;
-    if (metric.category === 'build') {
-      if (metric.inputType === 'boolean') earnedScore += log.value === 1 ? weight : 0;
-      else if (metric.inputType === 'scale') earnedScore += (log.value / 10) * weight;
-      else if (metric.inputType === 'counter') earnedScore += log.value >= 2 ? weight : (log.value / 2) * weight;
-    } else if (metric.category === 'reduce') {
-      if (metric.inputType === 'boolean') earnedScore += log.value === 0 ? weight : 0;
-      else if (metric.inputType === 'counter') earnedScore += (1 - Math.min(log.value, 10) / 10) * weight;
-    } else {
-      earnedScore += weight * 0.6;
-    }
-  }
-  const focusBonus = Math.min(focusMinutes / 90, 1) * 10;
-  const baseScore = totalWeight > 0 ? (earnedScore / totalWeight) * 90 : 0;
-  return Math.min(100, Math.round(baseScore + focusBonus));
-}
-
-function computeDayScore(metrics: TrackedMetric[], logs: DailyLog[]) {
-  const logsByMetric: Record<string, DailyLog> = {};
-  for (const log of logs) { logsByMetric[log.metricId] = log; }
-  const completed = metrics.filter(m => {
-    const log = logsByMetric[m.id];
-    if (!log) return false;
-    if (m.category === 'build') return log.value > 0;
-    if (m.category === 'reduce') return log.value === 0;
-    return true;
-  }).length;
-  return Math.round((completed / Math.max(metrics.length, 1)) * 100);
-}
-
-function computeStreakWithGrace(logDates: Set<string>, endDate: Date, graceDays: number = 1): { streak: number; graceActive: boolean } {
-  let streak = 0;
-  let graceUsed = 0;
-  let graceActive = false;
-  const d = new Date(endDate);
-  d.setHours(0, 0, 0, 0);
-  while (d.getTime() >= new Date('2024-01-01').getTime()) {
-    const ds = d.toISOString().split('T')[0];
-    if (logDates.has(ds)) {
-      streak++;
-      d.setDate(d.getDate() - 1);
-    } else if (graceUsed < graceDays && streak > 0) {
-      graceUsed++;
-      graceActive = true;
-      d.setDate(d.getDate() - 1);
-    } else {
-      break;
-    }
-  }
-  return { streak, graceActive };
-}
-
-function datesBetween(startDate: string, endDate: string): string[] {
-  const dates: string[] = [];
-  const start = new Date(startDate + 'T12:00:00');
-  const end = new Date(endDate + 'T12:00:00');
-  const d = new Date(start);
-  while (d <= end) {
-    dates.push(d.toISOString().split('T')[0]);
-    d.setDate(d.getDate() + 1);
-  }
-  return dates;
-}
-
-function computeCorrelationInsights(
-  dailyLogs: DailyLog[],
-  metrics: TrackedMetric[],
-  journalEntries: JournalEntry[]
-): CorrelationInsight[] {
-  const insights: CorrelationInsight[] = [];
-  const allDates = [...new Set(dailyLogs.map(l => l.date))].sort();
-  if (allDates.length < 7) {
-    insights.push({
-      id: 'motivation-start',
-      icon: '🧠',
-      title: 'Self-monitoring changes behavior',
-      body: 'Research shows that simply tracking a habit makes you 40% more likely to follow through. You\'re already ahead.',
-      type: 'motivation',
-      color: '#6366f1',
-    });
-    return insights;
-  }
-
-  const getMetricAvgOnDays = (metricId: string, dates: string[]) => {
-    const logs = dailyLogs.filter(l => l.metricId === metricId && dates.includes(l.date) && l.value >= 0);
-    if (logs.length === 0) return null;
-    return logs.reduce((s, l) => s + l.value, 0) / logs.length;
-  };
-
-  const sleepMetric = metrics.find(m => m.id === '00000000-0000-4000-8000-000000000006' || m.name === 'Slept on time');
-  const wakeMetric = metrics.find(m => m.id === '00000000-0000-4000-8000-000000000001' || m.name === 'Wake on time');
-  const moodMetric = metrics.find(m => m.id === '00000000-0000-4000-8000-000000000010' || m.name === 'Mood');
-  const productivityMetric = metrics.find(m => m.id === '00000000-0000-4000-8000-000000000011' || m.name === 'Productivity');
-  const alcoholMetric = metrics.find(m => m.id === '00000000-0000-4000-8000-000000000008' || m.name === 'Alcohol');
-  const cigaretteMetric = metrics.find(m => m.id === '00000000-0000-4000-8000-000000000007' || m.name === 'Cigarettes');
-
-  if (sleepMetric && moodMetric) {
-    const sleepLogs = dailyLogs.filter(l => l.metricId === sleepMetric.id && l.value >= 0);
-    const goodSleepDates = sleepLogs.filter(l => l.value === 1).map(l => l.date);
-    const badSleepDates = sleepLogs.filter(l => l.value === 0).map(l => l.date);
-    const moodGood = getMetricAvgOnDays(moodMetric.id, goodSleepDates);
-    const moodBad = getMetricAvgOnDays(moodMetric.id, badSleepDates);
-    if (moodGood !== null && moodBad !== null && goodSleepDates.length >= 3 && badSleepDates.length >= 2) {
-      const diff = Math.abs(moodGood - moodBad);
-      if (diff >= 1) {
-        insights.push({
-          id: 'sleep-mood',
-          icon: '😴',
-          title: `Sleep → Mood: +${diff.toFixed(1)} pts`,
-          body: `Your mood scores ${diff.toFixed(1)} points higher on days you sleep on time (${moodGood.toFixed(1)} vs ${moodBad.toFixed(1)} out of 10). Sleep is your biggest lever.`,
-          type: 'correlation',
-          color: '#6366f1',
-        });
-      }
-    }
-  }
-
-  if (wakeMetric && productivityMetric) {
-    const wakeLogs = dailyLogs.filter(l => l.metricId === wakeMetric.id && l.value >= 0);
-    const onTimeDates = wakeLogs.filter(l => l.value === 1).map(l => l.date);
-    const lateDates = wakeLogs.filter(l => l.value === 0).map(l => l.date);
-    const prodOnTime = getMetricAvgOnDays(productivityMetric.id, onTimeDates);
-    const prodLate = getMetricAvgOnDays(productivityMetric.id, lateDates);
-    if (prodOnTime !== null && prodLate !== null && onTimeDates.length >= 3) {
-      const diff = prodOnTime - prodLate;
-      if (diff >= 0.8) {
-        insights.push({
-          id: 'wake-productivity',
-          icon: '⚡',
-          title: `Early wake → +${diff.toFixed(1)} productivity`,
-          body: `You rate your productivity ${diff.toFixed(1)} points higher on days you wake on time. Your morning sets the tone for everything.`,
-          type: 'correlation',
-          color: '#f59e0b',
-        });
-      }
-    }
-  }
-
-  if (alcoholMetric) {
-    const alcoholLogs = dailyLogs.filter(l => l.metricId === alcoholMetric.id && l.value >= 0);
-    const drinkDays = alcoholLogs.filter(l => l.value > 0).map(l => l.date);
-    const soberDays = alcoholLogs.filter(l => l.value === 0).map(l => l.date);
-    if (drinkDays.length >= 2 && soberDays.length >= 2) {
-      const totalDays = drinkDays.length + soberDays.length;
-      const soberPct = Math.round((soberDays.length / totalDays) * 100);
-      if (soberPct >= 60) {
-        insights.push({
-          id: 'alcohol-trend',
-          icon: '📈',
-          title: `${soberPct}% alcohol-free days`,
-          body: `You've been alcohol-free ${soberDays.length} out of ${totalDays} tracked days. That's real progress — keep the number climbing.`,
-          type: 'trend',
-          color: '#22c55e',
-        });
-      }
-    }
-  }
-
-  if (cigaretteMetric) {
-    const cigLogs = dailyLogs.filter(l => l.metricId === cigaretteMetric.id && l.value >= 0);
-    if (cigLogs.length >= 7) {
-      const firstWeekAvg = cigLogs.slice(0, 7).reduce((s, l) => s + l.value, 0) / 7;
-      const lastWeekAvg = cigLogs.slice(-7).reduce((s, l) => s + l.value, 0) / 7;
-      const reduction = firstWeekAvg - lastWeekAvg;
-      if (reduction > 0) {
-        insights.push({
-          id: 'cigarette-trend',
-          icon: '🚬',
-          title: `Down ${reduction.toFixed(1)} cigarettes/day`,
-          body: `You started at ~${firstWeekAvg.toFixed(1)}/day. Now you're at ~${lastWeekAvg.toFixed(1)}/day. Reduction, not perfection — you're doing it.`,
-          type: 'trend',
-          color: '#22c55e',
-        });
-      }
-    }
-  }
-
-  const last7dates = allDates.slice(-7);
-  const daysLoggedLast7 = last7dates.filter(d => dailyLogs.some(l => l.date === d)).length;
-  if (daysLoggedLast7 === 7) {
-    insights.push({
-      id: 'perfect-week',
-      icon: '🔥',
-      title: '7 days straight — momentum is real',
-      body: 'You\'ve logged every single day this week. Consistency at this level becomes identity. This is who you are now.',
-      type: 'streak',
-      color: '#f59e0b',
-    });
-  } else if (daysLoggedLast7 >= 5) {
-    insights.push({
-      id: 'strong-week',
-      icon: '💪',
-      title: `${daysLoggedLast7}/7 days this week`,
-      body: 'Strong consistency. Two more days like this and you\'ll hit the perfect week — keep going.',
-      type: 'streak',
-      color: '#6366f1',
-    });
-  }
-
-  if (insights.length === 0) {
-    insights.push({
-      id: 'motivation-default',
-      icon: '🎯',
-      title: 'Every day you track is data',
-      body: 'Patterns emerge after 14 days. Correlations surface after 30. Keep logging — the insights are coming.',
-      type: 'motivation',
-      color: '#6366f1',
-    });
-  }
-
-  return insights;
-}
-
-const DEFAULT_POMODORO_SETTINGS: PomodoroSettings = {
-  workMinutes: 25,
-  shortBreak: 5,
-  longBreak: 15,
-};
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
-  const [metrics, setMetrics] = useState<TrackedMetric[]>(DEFAULT_METRICS);
-  const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
-  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
-  const [relapseLogs, setRelapseLogs] = useState<RelapseLog[]>([]);
-  const [weekTaskProgress, setWeekTaskProgress] = useState<WeekTaskProgress[]>([]);
-  const [focusMinutesToday, setFocusMinutesToday] = useState<number>(0);
+  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [programs, setPrograms] = useState<Program[]>([]);
+  const [workoutDays, setWorkoutDays] = useState<WorkoutDay[]>([]);
+  const [workoutDayExercises, setWorkoutDayExercises] = useState<WorkoutDayExercise[]>([]);
+  const [workoutSessions, setWorkoutSessions] = useState<WorkoutSession[]>([]);
+  const [exerciseLogs, setExerciseLogs] = useState<ExerciseLog[]>([]);
+  const [journals, setJournals] = useState<Journal[]>([]);
+
+  const [currentWorkoutSession, setCurrentWorkoutSession] = useState<WorkoutSession | null>(null);
   const [userIdState, setUserIdState] = useState<string | null>(null);
-  const [availablePrograms, setAvailablePrograms] = useState<Program[]>(AVAILABLE_PROGRAMS);
-  const [pomodoroSettings, setPomodoroSettingsState] = useState<PomodoroSettings>(DEFAULT_POMODORO_SETTINGS);
+  const [themeMode, setThemeModeState] = useState<'system' | 'light' | 'dark'>('system');
+
+  const [pomodoroSettings, setPomodoroSettingsState] = useState<PomodoroSettings>({
+    workMinutes: 25,
+    shortBreak: 5,
+    longBreak: 15
+  });
+  const [focusMinutesToday, setFocusMinutesToday] = useState<number>(0);
 
   useEffect(() => { loadAll(); }, []);
-
-  const [themeMode, setThemeModeState] = useState<'system' | 'light' | 'dark'>('system');
 
   const setThemeMode = useCallback(async (mode: 'system' | 'light' | 'dark') => {
     setThemeModeState(mode);
     await AsyncStorage.setItem('themeMode', mode);
   }, []);
 
-  const setPomodoroSettings = useCallback(async (updates: Partial<PomodoroSettings>) => {
-    setPomodoroSettingsState(prev => {
-      const next = { ...prev, ...updates };
-      AsyncStorage.setItem('pomodoroSettings', JSON.stringify(next));
-      return next;
-    });
-  }, []);
-
-  const refreshPrograms = useCallback(async (userId: string) => {
-    try {
-      const progs = await customFetch<Program[]>(`/programs?authorId=${userId}`);
-      if (progs && Array.isArray(progs)) {
-        const parsedProgs = progs.map(p => {
-          if (p.description && p.description.startsWith('{')) {
-            try {
-              const parsed = JSON.parse(p.description);
-              if (parsed.customImageBase64) {
-                p.imageUrl = parsed.customImageBase64;
-              }
-            } catch {}
-          }
-          return p;
-        });
-        const merged = [...parsedProgs];
-        for (const sp of AVAILABLE_PROGRAMS) {
-          if (!merged.some(p => p.id === sp.id)) {
-            merged.unshift(sp);
-          }
-        }
-        setAvailablePrograms(merged);
-        await AsyncStorage.setItem('availablePrograms', JSON.stringify(merged));
-      }
-    } catch (err) {
-      console.warn('Could not refresh programs list:', err);
-    }
-  }, []);
-
-  // Helper to sync local data to the cloud in the background
+  // Helper to sync local data to the cloud
   const syncWithCloud = useCallback(async (
     userId: string,
     currentProfile: UserProfile,
-    currentMetrics: TrackedMetric[],
-    currentLogs: DailyLog[],
-    currentJournal: JournalEntry[],
-    currentRelapse: RelapseLog[],
-    currentTasks: WeekTaskProgress[],
-    currentFocus: number
+    currentExercises: Exercise[],
+    currentPrograms: Program[],
+    currentDays: WorkoutDay[],
+    currentDayExs: WorkoutDayExercise[],
+    currentSessions: WorkoutSession[],
+    currentLogs: ExerciseLog[],
+    currentJournals: Journal[]
   ) => {
     try {
-      const todayStr = getLocalDateString();
-      const progProgress = Object.keys(currentProfile.programProgress).map(programId => ({
-        programId,
-        currentWeek: currentProfile.programProgress[programId].currentWeek,
-        weekStartDate: currentProfile.programProgress[programId].weekStartDate,
-        completedWeeks: currentProfile.programProgress[programId].completedWeeks,
-        resetCount: currentProfile.programProgress[programId].resetCount,
-      }));
-
       await customFetch(`/users/${userId}/sync`, {
         method: 'POST',
         body: JSON.stringify({
@@ -614,56 +303,63 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             activeProgramIds: currentProfile.activeProgramIds,
             savedProgramIds: currentProfile.savedProgramIds || [...currentProfile.activeProgramIds],
           },
-          metrics: currentMetrics.map(m => ({
-            id: m.id,
-            name: m.name,
-            category: m.category,
-            inputType: m.inputType,
-            scoreWeight: m.scoreWeight,
-            isCustom: m.isCustom || false,
-            implementationIntention: m.implementationIntention || null,
+          exercises: currentExercises.map(e => ({
+            id: e.id,
+            userId: e.userId || null,
+            name: e.name,
+            muscleGroup: e.muscleGroup,
+            equipment: e.equipment || null
           })),
-          dailyLogs: currentLogs.map(l => ({
+          programs: currentPrograms.map(p => ({
+            id: p.id,
+            userId: p.userId || null,
+            title: p.title,
+            description: p.description || null,
+            isTemplate: p.isTemplate,
+            color: p.color,
+            emoji: p.emoji
+          })),
+          workoutDays: currentDays.map(d => ({
+            id: d.id,
+            programId: d.programId,
+            dayNumber: d.dayNumber,
+            title: d.title,
+            targetMuscleGroups: d.targetMuscleGroups
+          })),
+          workoutDayExercises: currentDayExs.map(de => ({
+            id: de.id,
+            workoutDayId: de.workoutDayId,
+            exerciseId: de.exerciseId,
+            sortOrder: de.sortOrder,
+            targetSets: de.targetSets,
+            targetReps: de.targetReps,
+            targetRpe: de.targetRpe || null
+          })),
+          workoutSessions: currentSessions.map(s => ({
+            id: s.id,
+            userId: s.userId,
+            workoutDayId: s.workoutDayId || null,
+            startedAt: s.startedAt,
+            completedAt: s.completedAt || null,
+            volumeScore: s.volumeScore
+          })),
+          exerciseLogs: currentLogs.map(l => ({
             id: l.id,
-            metricId: l.metricId,
-            date: l.date,
-            value: l.value,
-            note: l.note || null,
+            workoutSessionId: l.workoutSessionId,
+            exerciseId: l.exerciseId,
+            setNumber: l.setNumber,
+            weight: l.weight,
+            reps: l.reps,
+            rpe: l.rpe || null,
+            isPr: l.isPr
           })),
-          journalEntries: currentJournal.map(j => ({
+          journals: currentJournals.map(j => ({
             id: j.id,
+            userId: j.userId,
             date: j.date,
-            prompt: j.prompt,
-            response: j.response,
-            freeResponse: j.freeResponse || null,
-            isWeeklyReflection: j.isWeeklyReflection || false,
-            programContext: j.programContext || null,
-            tags: j.tags || [],
-            wordCount: j.wordCount || 0,
-          })),
-          relapseLogs: currentRelapse.map(r => ({
-            id: r.id,
-            date: r.date,
-            metricId: r.metricId,
-            triggerCategory: r.triggerCategory,
-            triggerReflection: r.triggerReflection,
-            nextAction: r.nextAction,
-            compassionStatement: r.compassionStatement || null,
-          })),
-          programProgress: progProgress,
-          weekTaskProgress: currentTasks.map(t => ({
-            programId: t.programId || 'dopamine-detox-protocol',
-            weekNumber: t.weekNumber,
-            taskId: t.taskId,
-            completed: t.completed,
-          })),
-          focusLogs: [
-            {
-              id: '00000000-0000-4000-8000-000000000012',
-              date: todayStr,
-              minutes: currentFocus
-            }
-          ]
+            content: j.content,
+            mood: j.mood || null
+          }))
         })
       });
       console.log('Background cloud sync complete');
@@ -689,22 +385,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setUserIdState(result.userId);
         console.log('Registered user device in cloud:', result.userId);
         
-        // Initial sync of existing local data
         await syncWithCloud(
           result.userId,
           currentProfile,
-          metrics,
-          dailyLogs,
-          journalEntries,
-          relapseLogs,
-          weekTaskProgress,
-          focusMinutesToday
+          exercises,
+          programs,
+          workoutDays,
+          workoutDayExercises,
+          workoutSessions,
+          exerciseLogs,
+          journals
         );
 
-        // Refresh programs list
-        await refreshPrograms(result.userId).catch(console.warn);
-
-        // Fetch and save push token
         const token = await registerForPushNotificationsAsync();
         if (token) {
           await customFetch(`/users/${result.userId}/push-token`, {
@@ -716,7 +408,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.warn('Could not register device in cloud:', err);
     }
-  }, [metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday, syncWithCloud, refreshPrograms]);
+  }, [exercises, programs, workoutDays, workoutDayExercises, workoutSessions, exerciseLogs, journals, syncWithCloud]);
 
   async function loadAll() {
     try {
@@ -725,191 +417,82 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setThemeModeState(savedTheme as any);
       }
 
+      const savedPomodoro = await AsyncStorage.getItem('pomodoroSettings');
+      if (savedPomodoro) setPomodoroSettingsState(JSON.parse(savedPomodoro));
+      
+      const savedFocus = await AsyncStorage.getItem('focusMinutesToday');
+      if (savedFocus) setFocusMinutesToday(parseInt(savedFocus, 10));
+
       const savedUserId = await AsyncStorage.getItem('userId');
       if (savedUserId) {
         setUserIdState(savedUserId);
         
-        // Pull latest state from cloud on startup to synchronize changes
         try {
           const latest = await customFetch<any>(`/users/${savedUserId}/data`);
           if (latest) {
-            const programProgressDict: Record<string, any> = {};
-            if (latest.programProgress && Array.isArray(latest.programProgress)) {
-              latest.programProgress.forEach((p: any) => {
-                programProgressDict[p.programId] = {
-                  currentWeek: p.currentWeek,
-                  weekStartDate: p.weekStartDate,
-                  completedWeeks: p.completedWeeks || [],
-                  resetCount: p.resetCount || 0,
-                };
-              });
-            }
             const finalProfile = {
               ...DEFAULT_PROFILE,
               ...latest.profile,
               badges: latest.profile.badges || [],
-              programProgress: programProgressDict,
             };
             setProfile(finalProfile);
-            setMetrics(latest.metrics);
-            setDailyLogs(latest.dailyLogs);
-            setJournalEntries(latest.journalEntries);
-            setRelapseLogs(latest.relapseLogs);
-            setWeekTaskProgress(latest.weekTaskProgress);
-
-            const todayStr = getLocalDateString();
-            const todayFocus = latest.focusLogs.find((fl: any) => fl.date === todayStr);
-            if (todayFocus) {
-              setFocusMinutesToday(todayFocus.minutes);
-              await AsyncStorage.setItem(`focusMinutes_${todayStr}`, String(todayFocus.minutes));
-            }
+            setExercises(latest.exercises || []);
+            setPrograms(latest.programs || []);
+            setWorkoutDays(latest.workoutDays || []);
+            setWorkoutDayExercises(latest.workoutDayExercises || []);
+            setWorkoutSessions(latest.workoutSessions || []);
+            setExerciseLogs(latest.exerciseLogs || []);
+            setJournals(latest.journals || []);
 
             await Promise.all([
               AsyncStorage.setItem('profile', JSON.stringify(finalProfile)),
-              AsyncStorage.setItem('metrics', JSON.stringify(latest.metrics)),
-              AsyncStorage.setItem('dailyLogs', JSON.stringify(latest.dailyLogs)),
-              AsyncStorage.setItem('journalEntries', JSON.stringify(latest.journalEntries)),
-              AsyncStorage.setItem('relapseLogs', JSON.stringify(latest.relapseLogs)),
-              AsyncStorage.setItem('weekTaskProgress', JSON.stringify(latest.weekTaskProgress))
+              AsyncStorage.setItem('exercises', JSON.stringify(latest.exercises || [])),
+              AsyncStorage.setItem('programs', JSON.stringify(latest.programs || [])),
+              AsyncStorage.setItem('workoutDays', JSON.stringify(latest.workoutDays || [])),
+              AsyncStorage.setItem('workoutDayExercises', JSON.stringify(latest.workoutDayExercises || [])),
+              AsyncStorage.setItem('workoutSessions', JSON.stringify(latest.workoutSessions || [])),
+              AsyncStorage.setItem('exerciseLogs', JSON.stringify(latest.exerciseLogs || [])),
+              AsyncStorage.setItem('journals', JSON.stringify(latest.journals || []))
             ]);
-            console.log('Synchronized client with database on load');
-
-            // Refresh programs
-            refreshPrograms(savedUserId).catch(console.warn);
-
-            // Refresh push token and send to server
-            registerForPushNotificationsAsync().then(token => {
-              if (token) {
-                customFetch(`/users/${savedUserId}/push-token`, {
-                  method: 'POST',
-                  body: JSON.stringify({ token })
-                }).catch(console.warn);
-              }
-            });
-
+            console.log('Startup cloud synchronization complete');
             return;
           }
         } catch (err) {
-          console.log('Could not fetch cloud data on startup, using local cache:', err);
+          console.warn('Could not sync with cloud on startup, reading local storage:', err);
         }
       }
 
-      // Fallback: load strictly from local storage
-      const [profileRaw, metricsRaw, logsRaw, journalRaw, relapseRaw, progressRaw, focusRaw, progsRaw, pomRaw] = await Promise.all([
+      // Read local storage fallback
+      const [profileRaw, exRaw, prRaw, wdRaw, wdeRaw, wsRaw, elRaw, jrRaw, activeSessionRaw] = await Promise.all([
         AsyncStorage.getItem('profile'),
-        AsyncStorage.getItem('metrics'),
-        AsyncStorage.getItem('dailyLogs'),
-        AsyncStorage.getItem('journalEntries'),
-        AsyncStorage.getItem('relapseLogs'),
-        AsyncStorage.getItem('weekTaskProgress'),
-        AsyncStorage.getItem(`focusMinutes_${getLocalDateString()}`),
-        AsyncStorage.getItem('availablePrograms'),
-        AsyncStorage.getItem('pomodoroSettings'),
+        AsyncStorage.getItem('exercises'),
+        AsyncStorage.getItem('programs'),
+        AsyncStorage.getItem('workoutDays'),
+        AsyncStorage.getItem('workoutDayExercises'),
+        AsyncStorage.getItem('workoutSessions'),
+        AsyncStorage.getItem('exerciseLogs'),
+        AsyncStorage.getItem('journals'),
+        AsyncStorage.getItem('currentWorkoutSession')
       ]);
-      if (pomRaw) { try { setPomodoroSettingsState({ ...DEFAULT_POMODORO_SETTINGS, ...JSON.parse(pomRaw) }); } catch {} }
-      if (progsRaw) {
-        try {
-          setAvailablePrograms(JSON.parse(progsRaw));
-        } catch {}
-      }
-      if (profileRaw) {
-        const parsed = JSON.parse(profileRaw);
-        const merged = { ...DEFAULT_PROFILE, ...parsed };
-        if (!merged.activeProgramIds) merged.activeProgramIds = ['dopamine-detox-protocol'];
-        if (!merged.savedProgramIds) merged.savedProgramIds = [...merged.activeProgramIds];
-        if (!merged.programProgress) {
-          merged.programProgress = {
-            'dopamine-detox-protocol': {
-              currentWeek: merged.currentWeek ?? 1,
-              weekStartDate: merged.startDate ?? getLocalDateString(),
-              completedWeeks: [],
-              resetCount: 0,
-            },
-          };
-        }
-        setProfile(merged);
-      }
-      if (metricsRaw) {
-        const saved: TrackedMetric[] = JSON.parse(metricsRaw);
-        const defaults = DEFAULT_METRICS.filter(d => !saved.find(s => s.id === d.id));
-        setMetrics([...saved, ...defaults]);
-      }
-      if (logsRaw) setDailyLogs(JSON.parse(logsRaw));
-      if (journalRaw) setJournalEntries(JSON.parse(journalRaw));
-      if (relapseRaw) setRelapseLogs(JSON.parse(relapseRaw));
-      if (progressRaw) setWeekTaskProgress(JSON.parse(progressRaw));
-      if (focusRaw) setFocusMinutesToday(parseInt(focusRaw, 10));
-    } catch {}
+
+      if (profileRaw) setProfile(JSON.parse(profileRaw));
+      if (exRaw) setExercises(JSON.parse(exRaw));
+      if (prRaw) setPrograms(JSON.parse(prRaw));
+      if (wdRaw) setWorkoutDays(JSON.parse(wdRaw));
+      if (wdeRaw) setWorkoutDayExercises(JSON.parse(wdeRaw));
+      if (wsRaw) setWorkoutSessions(JSON.parse(wsRaw));
+      if (elRaw) setExerciseLogs(JSON.parse(elRaw));
+      if (jrRaw) setJournals(JSON.parse(jrRaw));
+      if (activeSessionRaw) setCurrentWorkoutSession(JSON.parse(activeSessionRaw));
+    } catch (err) {
+      console.error('Failed to load storage:', err);
+    }
   }
-
-  // Auto-sync debounced state changes to cloud in the background
-  useEffect(() => {
-    if (!userIdState) return;
-
-    const timer = setTimeout(() => {
-      syncWithCloud(userIdState, profile, metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday);
-    }, 1500);
-
-    return () => clearTimeout(timer);
-  }, [userIdState, profile, metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday, syncWithCloud]);
-
-  const filteredMetrics = useMemo(() => {
-    if (!profile.activeProgramIds || profile.activeProgramIds.length === 0) {
-      return metrics;
-    }
-
-    const activeTaskIds = new Set<string>();
-    const todayStr = getLocalDateString();
-    for (const programId of profile.activeProgramIds) {
-      const prog = availablePrograms.find(p => p.id === programId);
-      const progress = profile.programProgress[programId];
-      if (!prog || !progress || todayStr < progress.weekStartDate) continue;
-
-      const weekData = prog.weeks[progress.currentWeek - 1];
-      if (!weekData) continue;
-
-      for (const task of weekData.tasks) {
-        const isHabitTask = (task as any).isHabit === true || (task as any).isHabit === 'true' || !!(task as any).metricCategory;
-        if (isHabitTask) {
-          activeTaskIds.add(generateDeterministicId(userIdState || 'default', task.id));
-        }
-      }
-    }
-
-    return metrics.filter(m => activeTaskIds.has(m.id) || !(m as any).programId);
-  }, [metrics, profile.activeProgramIds, profile.programProgress, availablePrograms, userIdState]);
-
-  const today = getLocalDateString();
-  const todayLogs = dailyLogs.filter(l => l.date === today);
-  const disciplineScore = calculateDisciplineScore(todayLogs, filteredMetrics, focusMinutesToday);
-  const dayScore = computeDayScore(filteredMetrics, todayLogs);
-  const completedFilteredCount = todayLogs.filter(l => {
-    const m = filteredMetrics.find(fm => fm.id === l.metricId);
-    if (!m) return false;
-    if (m.category === 'build') return l.value > 0;
-    if (m.category === 'reduce') return l.value === 0;
-    return true;
-  }).length;
-  const completionPct = filteredMetrics.length > 0 ? Math.round((completedFilteredCount / filteredMetrics.length) * 100) : 0;
-
-  const logDates = useMemo(() => new Set(dailyLogs.map(l => l.date)), [dailyLogs]);
-
-  const streakResult = useMemo(() => computeStreakWithGrace(logDates, new Date()), [logDates]);
-  const currentStreak = streakResult.streak;
-  const graceStreakActive = streakResult.graceActive;
-  const highestStreak = useMemo(() => Math.max(profile.highestStreak, currentStreak), [profile.highestStreak, currentStreak]);
-  const levelInfo = useMemo(() => levelFromXP(profile.totalXP), [profile.totalXP]);
-
-  const correlationInsights = useMemo(
-    () => computeCorrelationInsights(dailyLogs, filteredMetrics, journalEntries),
-    [dailyLogs, filteredMetrics, journalEntries]
-  );
 
   const updateProfile = useCallback(async (updates: Partial<UserProfile>) => {
     setProfile(prev => {
       const next = { ...prev, ...updates };
       AsyncStorage.setItem('profile', JSON.stringify(next));
-      
       if (next.onboardingComplete && !userIdState) {
         registerAndSync(next);
       }
@@ -917,286 +500,287 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, [userIdState, registerAndSync]);
 
-  const addXP = useCallback((amount: number) => {
+  const login = useCallback(async (userId: string) => {
+    await AsyncStorage.setItem('userId', userId);
+    setUserIdState(userId);
+    try {
+      const latest = await customFetch<any>(`/users/${userId}/data`);
+      if (latest) {
+        setProfile(latest.profile);
+        setExercises(latest.exercises || []);
+        setPrograms(latest.programs || []);
+        setWorkoutDays(latest.workoutDays || []);
+        setWorkoutDayExercises(latest.workoutDayExercises || []);
+        setWorkoutSessions(latest.workoutSessions || []);
+        setExerciseLogs(latest.exerciseLogs || []);
+        setJournals(latest.journals || []);
+
+        await Promise.all([
+          AsyncStorage.setItem('profile', JSON.stringify(latest.profile)),
+          AsyncStorage.setItem('exercises', JSON.stringify(latest.exercises || [])),
+          AsyncStorage.setItem('programs', JSON.stringify(latest.programs || [])),
+          AsyncStorage.setItem('workoutDays', JSON.stringify(latest.workoutDays || [])),
+          AsyncStorage.setItem('workoutDayExercises', JSON.stringify(latest.workoutDayExercises || [])),
+          AsyncStorage.setItem('workoutSessions', JSON.stringify(latest.workoutSessions || [])),
+          AsyncStorage.setItem('exerciseLogs', JSON.stringify(latest.exerciseLogs || [])),
+          AsyncStorage.setItem('journals', JSON.stringify(latest.journals || []))
+        ]);
+        console.log('Login synchronization complete');
+      }
+    } catch (e) {
+      console.warn('Login offline fallback:', e);
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    await AsyncStorage.clear();
+    setUserIdState(null);
+    setProfile(DEFAULT_PROFILE);
+    setExercises([]);
+    setPrograms([]);
+    setWorkoutDays([]);
+    setWorkoutDayExercises([]);
+    setWorkoutSessions([]);
+    setExerciseLogs([]);
+    setJournals([]);
+    setCurrentWorkoutSession(null);
+  }, []);
+
+  const startWorkoutSession = useCallback(async (workoutDayId: string) => {
+    const newSessionId = generateId();
+    const newSession: WorkoutSession = {
+      id: newSessionId,
+      userId: userIdState || 'local-user',
+      workoutDayId,
+      startedAt: new Date().toISOString(),
+      volumeScore: 0
+    };
+    setCurrentWorkoutSession(newSession);
+    await AsyncStorage.setItem('currentWorkoutSession', JSON.stringify(newSession));
+    return newSessionId;
+  }, [userIdState]);
+
+  const logExerciseSet = useCallback(async (
+    exerciseId: string, 
+    setNumber: number, 
+    weight: number, 
+    reps: number, 
+    rpe?: number | null
+  ) => {
+    if (!currentWorkoutSession) return;
+    
+    setExerciseLogs(prev => {
+      const existing = prev.findIndex(
+        l => l.workoutSessionId === currentWorkoutSession.id && 
+             l.exerciseId === exerciseId && 
+             l.setNumber === setNumber
+      );
+      let next: ExerciseLog[];
+      const values = {
+        id: generateId(),
+        workoutSessionId: currentWorkoutSession.id,
+        exerciseId,
+        setNumber,
+        weight,
+        reps,
+        rpe,
+        isPr: false // Checked on finish
+      };
+      
+      if (existing >= 0) {
+        next = prev.map((l, i) => i === existing ? { ...l, weight, reps, rpe } : l);
+      } else {
+        next = [...prev, values];
+      }
+      AsyncStorage.setItem('exerciseLogs', JSON.stringify(next));
+      return next;
+    });
+  }, [currentWorkoutSession]);
+
+  const finishWorkoutSession = useCallback(async () => {
+    if (!currentWorkoutSession) return;
+
+    const sessionLogs = exerciseLogs.filter(l => l.workoutSessionId === currentWorkoutSession.id);
+    const volumeScore = sessionLogs.reduce((sum, log) => sum + (log.weight * log.reps), 0);
+
+    const completedSession: WorkoutSession = {
+      ...currentWorkoutSession,
+      completedAt: new Date().toISOString(),
+      volumeScore
+    };
+
+    // Calculate XP: 100 XP base + 10 XP per logged exercise + 1 XP per 100kg volume
+    const loggedExercisesCount = new Set(sessionLogs.map(l => l.exerciseId)).size;
+    const baseXP = 100;
+    const exerciseXP = loggedExercisesCount * 10;
+    const volumeXP = Math.floor(volumeScore / 100);
+    const earnedXP = baseXP + exerciseXP + volumeXP;
+
+    // Check PRs: update logs with PR flags if they beat previous best weight/reps combo
+    const finalLogs = exerciseLogs.map(log => {
+      if (log.workoutSessionId !== currentWorkoutSession.id) return log;
+      
+      const previousLogs = exerciseLogs.filter(
+        l => l.exerciseId === log.exerciseId && 
+             l.workoutSessionId !== currentWorkoutSession.id
+      );
+      const isBest = previousLogs.every(prev => log.weight > prev.weight || (log.weight === prev.weight && log.reps > prev.reps));
+      return { ...log, isPr: isBest };
+    });
+
+    setExerciseLogs(finalLogs);
+    await AsyncStorage.setItem('exerciseLogs', JSON.stringify(finalLogs));
+
+    setWorkoutSessions(prev => {
+      const next = [...prev, completedSession];
+      AsyncStorage.setItem('workoutSessions', JSON.stringify(next));
+      return next;
+    });
+
+    setCurrentWorkoutSession(null);
+    await AsyncStorage.removeItem('currentWorkoutSession');
+
+    // Update Profile XP & Streaks
     setProfile(prev => {
-      const next = { ...prev, totalXP: prev.totalXP + amount };
+      const next = { ...prev, totalXP: prev.totalXP + earnedXP };
       AsyncStorage.setItem('profile', JSON.stringify(next));
       return next;
     });
-  }, []);
 
-  const logMetric = useCallback(async (metricId: string, date: string, value: number, note?: string, context?: HabitContext) => {
-    setDailyLogs(prev => {
-      const existing = prev.findIndex(l => l.metricId === metricId && l.date === date);
-      let next: DailyLog[];
-      const updates: Partial<DailyLog> = { value };
-      if (note !== undefined) updates.note = note;
-      if (context !== undefined) updates.context = context;
-      if (existing >= 0) {
-        next = prev.map((l, i) => i === existing ? { ...l, ...updates } : l);
-      } else {
-        next = [...prev, { id: generateId(), metricId, date, value, note, context }];
-      }
-      AsyncStorage.setItem('dailyLogs', JSON.stringify(next));
-      return next;
-    });
-    
-    const currentStreakVal = currentStreak;
-    if (currentStreakVal > 0) {
-      updateStreakRiskFromLog(currentStreakVal);
-    }
-
-    // Two-Way Sync: if this logged metric is a program habit, update task completion
     if (userIdState) {
-      const todayStr = getLocalDateString();
-      if (date === todayStr) {
-        const isCompleted = value > 0;
-        for (const programId of profile.activeProgramIds) {
-          const prog = availablePrograms.find(p => p.id === programId);
-          const progress = profile.programProgress[programId];
-          if (!prog || !progress) continue;
-          
-          const weekData = prog.weeks[progress.currentWeek - 1];
-          if (!weekData) continue;
-          
-          for (const task of weekData.tasks) {
-            const isHabitTask = (task as any).isHabit || (task as any).metricCategory;
-            if (isHabitTask) {
-              const taskMetricId = generateDeterministicId(userIdState, task.id);
-              if (taskMetricId === metricId) {
-                setWeekTaskProgress(prev => {
-                  const existing = prev.findIndex(p =>
-                    p.weekNumber === progress.currentWeek && p.taskId === task.id &&
-                    (p.programId ?? 'dopamine-detox-protocol') === programId
-                  );
-                  let next: WeekTaskProgress[];
-                  if (existing >= 0) {
-                    next = prev.map((p, i) => i === existing ? { ...p, completed: isCompleted } : p);
-                  } else {
-                    next = [...prev, { weekNumber: progress.currentWeek, taskId: task.id, completed: isCompleted, programId }];
-                  }
-                  AsyncStorage.setItem('weekTaskProgress', JSON.stringify(next));
-                  return next;
-                });
-              }
-            }
-          }
-        }
-      }
-    }
-  }, [currentStreak, userIdState, profile.activeProgramIds, profile.programProgress, availablePrograms]);
-
-  const getLogForDate = useCallback((metricId: string, date: string) => {
-    return dailyLogs.find(l => l.metricId === metricId && l.date === date);
-  }, [dailyLogs]);
-
-  const getLogsForDate = useCallback((date: string) => {
-    return dailyLogs.filter(l => l.date === date);
-  }, [dailyLogs]);
-
-  const getLogsForMetric = useCallback((metricId: string, days: number) => {
-    const result: DailyLog[] = [];
-    for (let i = 0; i < days; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
-      const log = dailyLogs.find(l => l.metricId === metricId && l.date === dateStr);
-      result.unshift(log ?? { id: '', metricId, date: dateStr, value: -1 });
-    }
-    return result;
-  }, [dailyLogs]);
-
-  const getMetricStreak = useCallback((metricId: string): number => {
-    const metric = metrics.find(m => m.id === metricId);
-    if (!metric) return 0;
-    let streak = 0;
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    while (d.getTime() >= new Date('2024-01-01').getTime()) {
-      const ds = d.toISOString().split('T')[0];
-      const log = dailyLogs.find(l => l.metricId === metricId && l.date === ds);
-      if (!log) break;
-      const good = metric.category === 'build'
-        ? log.value > 0
-        : metric.category === 'reduce'
-          ? log.value === 0
-          : true;
-      if (good) { streak++; d.setDate(d.getDate() - 1); }
-      else break;
-    }
-    return streak;
-  }, [dailyLogs, metrics]);
-
-  const getMetricConsistency = useCallback((metricId: string, days: number): number => {
-    const metric = metrics.find(m => m.id === metricId);
-    if (!metric) return 0;
-    let successes = 0, total = 0;
-    for (let i = 0; i < days; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const ds = d.toISOString().split('T')[0];
-      const log = dailyLogs.find(l => l.metricId === metricId && l.date === ds);
-      if (log) {
-        total++;
-        const good = metric.category === 'build' ? log.value > 0 : metric.category === 'reduce' ? log.value === 0 : true;
-        if (good) successes++;
-      }
-    }
-    return total > 0 ? Math.round((successes / total) * 100) : 0;
-  }, [dailyLogs, metrics]);
-
-  const addJournalEntry = useCallback(async (entry: Omit<JournalEntry, 'id' | 'wordCount' | 'tags'>, freeResponse?: string, manualTags?: string[]) => {
-    const allText = ((entry.response || '') + ' ' + (freeResponse || '')).trim();
-    const wordCount = allText.split(/\s+/).filter(w => w.length > 0).length;
-    const detectedTags: string[] = [];
-    const text = allText.toLowerCase();
-    if (text.includes('stressed') || text.includes('anxious')) detectedTags.push('stress');
-    if (text.includes('tired') || text.includes('sleep')) detectedTags.push('sleep');
-    if (text.includes('craving') || text.includes('urge')) detectedTags.push('craving');
-    if (text.includes('proud') || text.includes('accomplish') || text.includes('win')) detectedTags.push('win');
-    if (text.includes('social') || text.includes('friend') || text.includes('family')) detectedTags.push('social');
-    if (text.includes('work') || text.includes('job') || text.includes('productive')) detectedTags.push('work');
-    if (text.includes('exercise') || text.includes('workout') || text.includes('gym') || text.includes('train')) detectedTags.push('fitness');
-    if (text.includes('meditat') || text.includes('mindful') || text.includes('breath')) detectedTags.push('mindfulness');
-    if (text.includes('relapse') || text.includes('slipped') || text.includes('failed')) detectedTags.push('relapse');
-    const mergedTags = Array.from(new Set([...detectedTags, ...(manualTags || [])]));
-    const enriched: Omit<JournalEntry, 'id'> = {
-      ...entry,
-      freeResponse: freeResponse?.trim() || undefined,
-      wordCount,
-      tags: mergedTags,
-    };
-    setJournalEntries(prev => {
-      const existing = prev.findIndex(e => e.date === entry.date);
-      let next: JournalEntry[];
-      if (existing >= 0) {
-        next = prev.map((e, i) => i === existing ? { ...e, ...enriched } : e);
-      } else {
-        next = [...prev, { id: generateId(), ...enriched }];
-      }
-      AsyncStorage.setItem('journalEntries', JSON.stringify(next));
-      return next;
-    });
-  }, []);
-
-  const getJournalEntryForDate = useCallback((date: string) => {
-    return journalEntries.find(e => e.date === date);
-  }, [journalEntries]);
-
-  const addRelapseLog = useCallback(async (log: Omit<RelapseLog, 'id'>) => {
-    setRelapseLogs(prev => {
-      const next = [...prev, { id: generateId(), ...log }];
-      AsyncStorage.setItem('relapseLogs', JSON.stringify(next));
-      return next;
-    });
-  }, []);
-
-  const toggleWeekTask = useCallback(async (weekNumber: number, taskId: string, programId?: string) => {
-    const pid = programId ?? 'dopamine-detox-protocol';
-    let wasComplete = false;
-    setWeekTaskProgress(prev => {
-      const existing = prev.findIndex(p =>
-        p.weekNumber === weekNumber && p.taskId === taskId &&
-        (p.programId ?? 'dopamine-detox-protocol') === pid
+      await syncWithCloud(
+        userIdState,
+        { ...profile, totalXP: profile.totalXP + earnedXP },
+        exercises,
+        programs,
+        workoutDays,
+        workoutDayExercises,
+        [...workoutSessions, completedSession],
+        finalLogs,
+        journals
       );
-      let next: WeekTaskProgress[];
-      if (existing >= 0) {
-        wasComplete = prev[existing].completed;
-        next = prev.map((p, i) => i === existing ? { ...p, completed: !p.completed } : p);
-      } else {
-        wasComplete = false;
-        next = [...prev, { weekNumber, taskId, completed: true, programId: pid }];
-      }
-      AsyncStorage.setItem('weekTaskProgress', JSON.stringify(next));
+    }
+  }, [currentWorkoutSession, exerciseLogs, userIdState, exercises, programs, workoutDays, workoutDayExercises, workoutSessions, journals, profile, syncWithCloud]);
+
+  const cancelWorkoutSession = useCallback(async () => {
+    if (!currentWorkoutSession) return;
+    
+    // Delete logs of the cancelled session
+    setExerciseLogs(prev => {
+      const next = prev.filter(l => l.workoutSessionId !== currentWorkoutSession.id);
+      AsyncStorage.setItem('exerciseLogs', JSON.stringify(next));
       return next;
     });
 
-    // Two-Way Sync: if this is a program habit, log it in dailyLogs!
-    const prog = availablePrograms.find(p => p.id === pid);
-    if (prog && userIdState) {
-      const weekData = prog.weeks[weekNumber - 1];
-      const task = weekData?.tasks.find(t => t.id === taskId);
-      const isHabitTask = task && ((task as any).isHabit || (task as any).metricCategory);
-      if (task && isHabitTask) {
-        const metricId = generateDeterministicId(userIdState, task.id);
-        const value = !wasComplete ? 1 : 0;
-        setDailyLogs(prev => {
-          const date = getLocalDateString();
-          const existing = prev.findIndex(l => l.metricId === metricId && l.date === date);
-          let next: DailyLog[];
-          if (existing >= 0) {
-            next = prev.map((l, i) => i === existing ? { ...l, value } : l);
-          } else {
-            next = [...prev, { id: generateId(), metricId, date, value }];
-          }
-          AsyncStorage.setItem('dailyLogs', JSON.stringify(next));
-          return next;
+    setCurrentWorkoutSession(null);
+    await AsyncStorage.removeItem('currentWorkoutSession');
+  }, [currentWorkoutSession]);
+
+  const addJournal = useCallback(async (content: string, mood?: string | null) => {
+    const newJournal: Journal = {
+      id: generateId(),
+      userId: userIdState || 'local-user',
+      date: getLocalDateString(),
+      content,
+      mood: mood || null
+    };
+
+    setJournals(prev => {
+      const next = [...prev, newJournal];
+      AsyncStorage.setItem('journals', JSON.stringify(next));
+      return next;
+    });
+
+    if (userIdState) {
+      await syncWithCloud(
+        userIdState,
+        profile,
+        exercises,
+        programs,
+        workoutDays,
+        workoutDayExercises,
+        workoutSessions,
+        exerciseLogs,
+        [...journals, newJournal]
+      );
+    }
+  }, [userIdState, profile, exercises, programs, workoutDays, workoutDayExercises, workoutSessions, exerciseLogs, journals, syncWithCloud]);
+
+  const createCustomProgram = useCallback(async (
+    programData: Omit<Program, 'id' | 'isTemplate'>, 
+    daysData: { title: string; dayNumber: number; targetMuscleGroups: string[]; exercises: { exerciseId: string; targetSets: number; targetReps: number; targetRpe?: number }[] }[]
+  ) => {
+    const programId = `custom-${Date.now()}`;
+    const newProgram: Program = {
+      id: programId,
+      userId: userIdState || 'local-user',
+      title: programData.title,
+      description: programData.description || null,
+      isTemplate: false,
+      color: programData.color || '#7C3AED',
+      emoji: programData.emoji || '💪'
+    };
+
+    const newDays: WorkoutDay[] = [];
+    const newDayExs: WorkoutDayExercise[] = [];
+
+    daysData.forEach(d => {
+      const dayId = generateId();
+      newDays.push({
+        id: dayId,
+        programId,
+        dayNumber: d.dayNumber,
+        title: d.title,
+        targetMuscleGroups: d.targetMuscleGroups
+      });
+
+      d.exercises.forEach((ex, idx) => {
+        newDayExs.push({
+          id: generateId(),
+          workoutDayId: dayId,
+          exerciseId: ex.exerciseId,
+          sortOrder: idx + 1,
+          targetSets: ex.targetSets,
+          targetReps: ex.targetReps,
+          targetRpe: ex.targetRpe || null
         });
-      }
-    }
-  }, [availablePrograms, userIdState]);
+      });
+    });
 
-  const isWeekTaskComplete = useCallback((weekNumber: number, taskId: string, programId?: string) => {
-    const pid = programId ?? 'dopamine-detox-protocol';
-    return weekTaskProgress.some(p =>
-      p.weekNumber === weekNumber && p.taskId === taskId && p.completed &&
-      (p.programId === pid || (!p.programId && pid === 'dopamine-detox-protocol'))
-    );
-  }, [weekTaskProgress]);
+    setPrograms(prev => {
+      const next = [...prev, newProgram];
+      AsyncStorage.setItem('programs', JSON.stringify(next));
+      return next;
+    });
 
-  // Dynamic Habit Injection Effect
-  useEffect(() => {
-    if (!profile.activeProgramIds) return;
+    setWorkoutDays(prev => {
+      const next = [...prev, ...newDays];
+      AsyncStorage.setItem('workoutDays', JSON.stringify(next));
+      return next;
+    });
 
-    let metricsUpdated = false;
-    const currentMetrics = [...metrics];
+    setWorkoutDayExercises(prev => {
+      const next = [...prev, ...newDayExs];
+      AsyncStorage.setItem('workoutDayExercises', JSON.stringify(next));
+      return next;
+    });
 
-    const todayStr = getLocalDateString();
-    for (const programId of profile.activeProgramIds) {
-      const prog = availablePrograms.find(p => p.id === programId);
-      const progress = profile.programProgress[programId];
-      if (!prog || !progress || todayStr < progress.weekStartDate) continue;
-
-      const weekData = prog.weeks[progress.currentWeek - 1];
-      if (!weekData) continue;
-
-      for (const task of weekData.tasks) {
-        const isHabitTask = (task as any).isHabit === true || (task as any).isHabit === 'true' || !!(task as any).metricCategory;
-        if (isHabitTask) {
-          const deterministicId = generateDeterministicId(userIdState || 'default', task.id);
-          const existingIdx = currentMetrics.findIndex(m => m.id === deterministicId);
-          if (existingIdx >= 0) {
-            if (!(currentMetrics[existingIdx] as any).programId) {
-              currentMetrics[existingIdx] = { ...currentMetrics[existingIdx], programId: prog.id } as any;
-              metricsUpdated = true;
-            }
-          } else {
-            currentMetrics.push({
-              id: deterministicId,
-              name: task.title,
-              category: (task as any).metricCategory ?? 'build',
-              inputType: (task as any).metricInputType ?? 'boolean',
-              unitLabel: (task as any).metricUnitLabel ?? '',
-              isSensitive: false,
-              scoreWeight: (task as any).metricScoreWeight ?? 5,
-              emoji: prog.emoji ?? '📋',
-              isCustom: true,
-              isDefault: false,
-              implementationIntention: task.description,
-              programId: prog.id,
-            } as any);
-            metricsUpdated = true;
-          }
-        }
-      }
+    if (userIdState) {
+      await syncWithCloud(
+        userIdState,
+        profile,
+        exercises,
+        [...programs, newProgram],
+        [...workoutDays, ...newDays],
+        [...workoutDayExercises, ...newDayExs],
+        workoutSessions,
+        exerciseLogs,
+        journals
+      );
     }
 
-    if (metricsUpdated) {
-      setMetrics(currentMetrics);
-      AsyncStorage.setItem('metrics', JSON.stringify(currentMetrics));
-      console.log('Injected active program habits into user metrics');
-    }
-  }, [userIdState, profile.activeProgramIds, profile.programProgress, availablePrograms, metrics]);
+    return newProgram;
+  }, [userIdState, profile, exercises, programs, workoutDays, workoutDayExercises, workoutSessions, exerciseLogs, journals, syncWithCloud]);
 
   const enrollProgram = useCallback(async (programId: string) => {
     if (profile.activeProgramIds.includes(programId)) return;
@@ -1204,450 +788,386 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const nextProfile = {
       ...profile,
       activeProgramIds: [...profile.activeProgramIds, programId],
-      programProgress: {
-        ...profile.programProgress,
-        [programId]: { currentWeek: 1, weekStartDate: getLocalDateString(), completedWeeks: [], resetCount: 0 },
-      },
     };
-    
     setProfile(nextProfile);
     await AsyncStorage.setItem('profile', JSON.stringify(nextProfile));
 
-    const programTitle = availablePrograms.find(p => p.id === programId)?.title ?? 'a new program';
-    const newEntry = {
-      id: generateId(),
-      date: getLocalDateString(),
-      prompt: 'Program Started',
-      response: `I started ${programTitle} today.`,
-      tags: ['system', 'program-start'],
-      wordCount: 5,
-    };
-    
-    const nextJournalEntries = [...journalEntries, newEntry];
-    setJournalEntries(nextJournalEntries);
-    await AsyncStorage.setItem('journalEntries', JSON.stringify(nextJournalEntries));
-    
     if (userIdState) {
-      await syncWithCloud(userIdState, nextProfile, metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday);
+      await syncWithCloud(
+        userIdState,
+        nextProfile,
+        exercises,
+        programs,
+        workoutDays,
+        workoutDayExercises,
+        workoutSessions,
+        exerciseLogs,
+        journals
+      );
     }
-  }, [profile, userIdState, metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday, syncWithCloud]);
+  }, [profile, userIdState, exercises, programs, workoutDays, workoutDayExercises, workoutSessions, exerciseLogs, journals, syncWithCloud]);
 
   const unenrollProgram = useCallback(async (programId: string) => {
-    const nextMetrics = metrics.filter(m => (m as any).programId !== programId);
-    setMetrics(nextMetrics);
-    await AsyncStorage.setItem('metrics', JSON.stringify(nextMetrics));
-
     const nextProfile = {
       ...profile,
-      activeProgramIds: profile.activeProgramIds.filter(id => id !== programId)
+      activeProgramIds: profile.activeProgramIds.filter(id => id !== programId),
     };
     setProfile(nextProfile);
     await AsyncStorage.setItem('profile', JSON.stringify(nextProfile));
-    
+
     if (userIdState) {
-      await syncWithCloud(userIdState, nextProfile, nextMetrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday);
+      await syncWithCloud(
+        userIdState,
+        nextProfile,
+        exercises,
+        programs,
+        workoutDays,
+        workoutDayExercises,
+        workoutSessions,
+        exerciseLogs,
+        journals
+      );
     }
-  }, [profile, userIdState, metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday, syncWithCloud]);
+  }, [profile, userIdState, exercises, programs, workoutDays, workoutDayExercises, workoutSessions, exerciseLogs, journals, syncWithCloud]);
+
+  const setPomodoroSettings = useCallback(async (updates: Partial<PomodoroSettings>) => {
+    setPomodoroSettingsState(prev => {
+      const next = { ...prev, ...updates };
+      AsyncStorage.setItem('pomodoroSettings', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const addFocusMinutes = useCallback(async (mins: number) => {
+    setFocusMinutesToday(prev => {
+      const next = prev + mins;
+      AsyncStorage.setItem('focusMinutesToday', String(next));
+      return next;
+    });
+    setProfile(prev => {
+      const next = { ...prev, totalXP: prev.totalXP + Math.floor(mins * 0.5) };
+      AsyncStorage.setItem('profile', JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   const toggleSavedProgram = useCallback(async (programId: string) => {
     const isSaved = profile.savedProgramIds?.includes(programId);
     const nextSaved = isSaved
-      ? profile.savedProgramIds.filter(id => id !== programId)
+      ? (profile.savedProgramIds || []).filter(id => id !== programId)
       : [...(profile.savedProgramIds || []), programId];
     
-    const nextProfile = { ...profile, savedProgramIds: nextSaved };
+    const nextProfile = {
+      ...profile,
+      savedProgramIds: nextSaved
+    };
     setProfile(nextProfile);
     await AsyncStorage.setItem('profile', JSON.stringify(nextProfile));
-    
+
     if (userIdState) {
-      await syncWithCloud(userIdState, nextProfile, metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday);
+      await syncWithCloud(
+        userIdState,
+        nextProfile,
+        exercises,
+        programs,
+        workoutDays,
+        workoutDayExercises,
+        workoutSessions,
+        exerciseLogs,
+        journals
+      );
     }
-  }, [profile, userIdState, metrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress, focusMinutesToday, syncWithCloud]);
-
-  const createCustomProgram = useCallback(async (programData: Omit<Program, 'id' | 'isSystem'>) => {
-    if (!userIdState) return;
-    try {
-      const newProg = await customFetch<Program>('/programs', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...programData,
-          authorId: userIdState,
-        }),
-      });
-      if (newProg) {
-        if (newProg.description && newProg.description.startsWith('{')) {
-          try {
-            const parsed = JSON.parse(newProg.description);
-            if (parsed.customImageBase64) newProg.imageUrl = parsed.customImageBase64;
-          } catch {}
-        }
-        setAvailablePrograms(prev => {
-          const next = [...prev, newProg];
-          AsyncStorage.setItem('availablePrograms', JSON.stringify(next));
-          return next;
-        });
-        return newProg;
-      }
-    } catch (err) {
-      console.error('Failed to create custom program:', err);
-      throw err;
-    }
-  }, [userIdState]);
-
-  const updateCustomProgram = useCallback(async (programId: string, updates: Partial<Program>) => {
-    try {
-      const updated = await customFetch<Program>(`/programs/${programId}`, {
-        method: 'PUT',
-        body: JSON.stringify(updates),
-      });
-      if (updated) {
-        if (updated.description && updated.description.startsWith('{')) {
-          try {
-            const parsed = JSON.parse(updated.description);
-            if (parsed.customImageBase64) updated.imageUrl = parsed.customImageBase64;
-          } catch {}
-        }
-        setAvailablePrograms(prev => {
-          const next = prev.map(p => p.id === programId ? { ...p, ...updated } : p);
-          AsyncStorage.setItem('availablePrograms', JSON.stringify(next));
-          return next;
-        });
-        return updated;
-      }
-    } catch (err) {
-      console.error('Failed to update custom program:', err);
-      throw err;
-    }
-  }, []);
+  }, [profile, userIdState, exercises, programs, workoutDays, workoutDayExercises, workoutSessions, exerciseLogs, journals, syncWithCloud]);
 
   const deleteCustomProgram = useCallback(async (programId: string) => {
+    setPrograms(prev => {
+      const next = prev.filter(p => p.id !== programId);
+      AsyncStorage.setItem('programs', JSON.stringify(next));
+      return next;
+    });
+    setWorkoutDays(prev => {
+      const next = prev.filter(d => d.programId !== programId);
+      AsyncStorage.setItem('workoutDays', JSON.stringify(next));
+      return next;
+    });
+    const dayIds = workoutDays.filter(d => d.programId === programId).map(d => d.id);
+    setWorkoutDayExercises(prev => {
+      const next = prev.filter(de => !dayIds.includes(de.workoutDayId));
+      AsyncStorage.setItem('workoutDayExercises', JSON.stringify(next));
+      return next;
+    });
+
+    if (userIdState) {
+      try {
+        await customFetch(`/programs/${programId}`, {
+          method: 'DELETE'
+        });
+      } catch (err) {
+        console.warn('Could not delete program from cloud:', err);
+      }
+    }
+  }, [userIdState, workoutDays]);
+
+  const publishProgram = useCallback(async (programId: string) => {
+    if (!userIdState) return;
     try {
-      await customFetch(`/programs/${programId}`, {
-        method: 'DELETE',
+      const prog = programs.find(p => p.id === programId);
+      if (!prog) return;
+      
+      const progDays = workoutDays.filter(d => d.programId === programId);
+      const dayIds = progDays.map(d => d.id);
+      const progDayExs = workoutDayExercises.filter(de => dayIds.includes(de.workoutDayId));
+
+      await customFetch(`/programs/${programId}/publish`, {
+        method: 'POST',
+        body: JSON.stringify({
+          program: prog,
+          days: progDays,
+          dayExercises: progDayExs
+        })
       });
-      setAvailablePrograms(prev => {
-        const next = prev.filter(p => p.id !== programId);
-        AsyncStorage.setItem('availablePrograms', JSON.stringify(next));
+      
+      setPrograms(prev => {
+        const next = prev.map(p => p.id === programId ? { ...p, isTemplate: true } : p);
+        AsyncStorage.setItem('programs', JSON.stringify(next));
         return next;
       });
-      if (profile.activeProgramIds.includes(programId)) {
-        await unenrollProgram(programId);
-      }
-      if (profile.savedProgramIds?.includes(programId)) {
-        await toggleSavedProgram(programId);
-      }
     } catch (err) {
-      console.error('Failed to delete custom program:', err);
-      throw err;
+      console.warn('Could not publish program to cloud:', err);
     }
-  }, [profile.activeProgramIds, unenrollProgram]);
+  }, [userIdState, programs, workoutDays, workoutDayExercises]);
 
-  const publishProgram = useCallback(async (programId: string, isPublished: boolean) => {
-    try {
-      const updated = await customFetch<Program>(`/programs/${programId}/publish`, {
-        method: 'PATCH',
-        body: JSON.stringify({ isPublished }),
+  const updateCustomProgram = useCallback(async (
+    programId: string,
+    programData: Partial<Program>,
+    daysData: { id?: string; title: string; dayNumber: number; targetMuscleGroups: string[]; exercises: { exerciseId: string; targetSets: number; targetReps: number; targetRpe?: number }[] }[]
+  ) => {
+    setPrograms(prev => {
+      const next = prev.map(p => p.id === programId ? { ...p, ...programData } : p);
+      AsyncStorage.setItem('programs', JSON.stringify(next));
+      return next;
+    });
+
+    const newDays: WorkoutDay[] = [];
+    const newDayExs: WorkoutDayExercise[] = [];
+
+    daysData.forEach(d => {
+      const dayId = d.id || generateId();
+      newDays.push({
+        id: dayId,
+        programId,
+        dayNumber: d.dayNumber,
+        title: d.title,
+        targetMuscleGroups: d.targetMuscleGroups
       });
-      if (updated) {
-        setAvailablePrograms(prev => {
-          const next = prev.map(p => p.id === programId ? { ...p, isPublished } : p);
-          AsyncStorage.setItem('availablePrograms', JSON.stringify(next));
-          return next;
+
+      d.exercises.forEach((ex, idx) => {
+        newDayExs.push({
+          id: generateId(),
+          workoutDayId: dayId,
+          exerciseId: ex.exerciseId,
+          sortOrder: idx + 1,
+          targetSets: ex.targetSets,
+          targetReps: ex.targetReps,
+          targetRpe: ex.targetRpe || null
         });
-        return updated;
-      }
-    } catch (err) {
-      console.error('Failed to publish program:', err);
-      throw err;
-    }
-  }, []);
-
-  const addCustomMetric = useCallback(async (metric: Omit<TrackedMetric, 'id' | 'isDefault' | 'isCustom'>) => {
-    const newMetric: TrackedMetric = { ...metric, id: generateId(), isDefault: false, isCustom: true };
-    setMetrics(prev => {
-      const next = [...prev, newMetric];
-      AsyncStorage.setItem('metrics', JSON.stringify(next));
-      return next;
-    });
-  }, []);
-
-  const deleteMetric = useCallback(async (metricId: string) => {
-    setMetrics(prev => {
-      const next = prev.filter(m => m.id !== metricId);
-      AsyncStorage.setItem('metrics', JSON.stringify(next));
-      return next;
-    });
-    setDailyLogs(prev => {
-      const next = prev.filter(l => l.metricId !== metricId);
-      AsyncStorage.setItem('dailyLogs', JSON.stringify(next));
-      return next;
-    });
-  }, []);
-
-  const addFocusMinutes = useCallback(async (minutes: number) => {
-    setFocusMinutesToday(prev => {
-      const next = prev + minutes;
-      AsyncStorage.setItem(`focusMinutes_${today}`, String(next));
-      return next;
-    });
-  }, [today]);
-
-
-
-  const getWeekGatingStatus = useCallback((programId: string): WeekGatingStatus => {
-    const prog = AVAILABLE_PROGRAMS.find(p => p.id === programId);
-    const progress = profile.programProgress[programId];
-    if (!prog || !progress) {
-      return { daysTracked: 0, daysJournaled: 0, tasksCompleted: 0, totalTasks: 0, canAdvance: false, shouldRestart: false, daysSinceWeekStart: 0, weekPassThreshold: 5 };
-    }
-    const weekData = prog.weeks[progress.currentWeek - 1];
-    if (!weekData) {
-      return { daysTracked: 0, daysJournaled: 0, tasksCompleted: 0, totalTasks: 0, canAdvance: false, shouldRestart: false, daysSinceWeekStart: 0, weekPassThreshold: 5 };
-    }
-    const weekStart = progress.weekStartDate;
-    const todayStr = getLocalDateString();
-    const weekDays = datesBetween(weekStart, todayStr);
-    const daysSinceWeekStart = weekDays.length - 1;
-    const PASS_THRESHOLD = 5;
-    const daysTracked = weekDays.filter(d => dailyLogs.filter(l => l.date === d).length > 0).length;
-    const daysJournaled = weekDays.filter(d => journalEntries.some(e => e.date === d)).length;
-    const tasksCompleted = weekData.tasks.filter(t => isWeekTaskComplete(progress.currentWeek, t.id, programId)).length;
-    const totalTasks = weekData.tasks.length;
-    const canAdvance = daysTracked >= PASS_THRESHOLD && daysJournaled >= 1 && tasksCompleted >= Math.ceil(totalTasks * 0.5);
-    const shouldRestart = daysSinceWeekStart >= 14 && !canAdvance;
-    return { daysTracked, daysJournaled, tasksCompleted, totalTasks, canAdvance, shouldRestart, daysSinceWeekStart, weekPassThreshold: PASS_THRESHOLD };
-  }, [profile.programProgress, dailyLogs, journalEntries, isWeekTaskComplete]);
-
-  const advanceProgramWeek = useCallback(async (programId: string) => {
-    const prog = AVAILABLE_PROGRAMS.find(p => p.id === programId);
-    const progress = profile.programProgress[programId];
-    if (!prog || !progress) return;
-    const newWeek = Math.min(progress.currentWeek + 1, prog.totalWeeks);
-    const newCompletedWeeks = progress.completedWeeks.includes(progress.currentWeek)
-      ? progress.completedWeeks : [...progress.completedWeeks, progress.currentWeek];
-    setProfile(prev => {
-      const next = {
-        ...prev,
-        currentWeek: programId === 'dopamine-detox-protocol' ? newWeek : prev.currentWeek,
-        programProgress: {
-          ...prev.programProgress,
-          [programId]: { ...progress, currentWeek: newWeek, weekStartDate: getLocalDateString(), completedWeeks: newCompletedWeeks },
-        },
-      };
-      AsyncStorage.setItem('profile', JSON.stringify(next));
-      return next;
-    });
-  }, [profile.programProgress]);
-
-  const restartProgramWeek = useCallback(async (programId: string) => {
-    const progress = profile.programProgress[programId];
-    if (!progress) return;
-    setWeekTaskProgress(prev => {
-      const next = prev.filter(p => !(
-        (p.programId === programId || (!p.programId && programId === 'dopamine-detox-protocol'))
-        && p.weekNumber === progress.currentWeek
-      ));
-      AsyncStorage.setItem('weekTaskProgress', JSON.stringify(next));
-      return next;
-    });
-    setProfile(prev => {
-      const next = {
-        ...prev,
-        programProgress: {
-          ...prev.programProgress,
-          [programId]: { ...progress, weekStartDate: getLocalDateString(), resetCount: (progress.resetCount ?? 0) + 1 },
-        },
-      };
-      AsyncStorage.setItem('profile', JSON.stringify(next));
-      return next;
-    });
-  }, [profile.programProgress]);
-
-  const getProgramProgress = useCallback((programId: string) => {
-    return profile.programProgress[programId];
-  }, [profile.programProgress]);
-
-  const getStreak = useCallback(() => currentStreak, [currentStreak]);
-
-  const getStreakRisk = useCallback(() => {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
-    return !logDates.has(yesterdayStr) && !logDates.has(today);
-  }, [logDates, today]);
-
-  const getMissedDays = useCallback((days: number) => {
-    const missed: string[] = [];
-    for (let i = 0; i < days; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const ds = d.toISOString().split('T')[0];
-      if (!logDates.has(ds)) missed.push(ds);
-    }
-    return missed;
-  }, [logDates]);
-
-  const getRecentActivity = useCallback((count: number): ActivityItem[] => {
-    const items: ActivityItem[] = [];
-    const todayLogsArr = dailyLogs.filter(l => l.date === today);
-    for (const log of todayLogsArr) {
-      const metric = metrics.find(m => m.id === log.metricId);
-      if (!metric) continue;
-      const isGood = metric.category === 'build' ? log.value > 0 : (metric.category === 'reduce' ? log.value === 0 : true);
-      items.push({
-        id: log.id, type: 'habit', date: log.date,
-        emoji: isGood ? '✔' : '✗',
-        text: `${metric.name} ${metric.inputType === 'boolean' ? (isGood ? 'done' : 'skipped') : `set to ${log.value}`}`,
-        time: 'Today', xp: isGood ? 10 : 0,
       });
+    });
+
+    setWorkoutDays(prev => {
+      const filtered = prev.filter(d => d.programId !== programId);
+      const next = [...filtered, ...newDays];
+      AsyncStorage.setItem('workoutDays', JSON.stringify(next));
+      return next;
+    });
+
+    const dayIdsToRemove = workoutDays.filter(d => d.programId === programId).map(d => d.id);
+    setWorkoutDayExercises(prev => {
+      const filtered = prev.filter(de => !dayIdsToRemove.includes(de.workoutDayId));
+      const next = [...filtered, ...newDayExs];
+      AsyncStorage.setItem('workoutDayExercises', JSON.stringify(next));
+      return next;
+    });
+
+    if (userIdState) {
+      await syncWithCloud(
+        userIdState,
+        profile,
+        exercises,
+        programs.map(p => p.id === programId ? { ...p, ...programData } : p),
+        [...workoutDays.filter(d => d.programId !== programId), ...newDays],
+        [...workoutDayExercises.filter(de => !dayIdsToRemove.includes(de.workoutDayId)), ...newDayExs],
+        workoutSessions,
+        exerciseLogs,
+        journals
+      );
     }
-    const journalToday = journalEntries.find(e => e.date === today);
-    if (journalToday) items.push({ id: journalToday.id, type: 'journal', date: today, emoji: '📝', text: 'Journal entry saved', time: 'Today', xp: 25 });
-    if (focusMinutesToday > 0) items.push({ id: generateId(), type: 'focus', date: today, emoji: '🎯', text: `${focusMinutesToday} min deep work`, time: 'Today', xp: Math.min(focusMinutesToday, 10) });
-    return items.slice(0, count);
-  }, [dailyLogs, metrics, journalEntries, focusMinutesToday, today]);
+  }, [userIdState, profile, exercises, programs, workoutDays, workoutDayExercises, workoutSessions, exerciseLogs, journals, syncWithCloud]);
+
+  const addRelapseLog = useCallback(async (payload: any) => {}, []);
+
+  const thisWeekSessionsCount = useMemo(() => {
+    const startOfWeek = new Date();
+    const currentDay = startOfWeek.getDay();
+    const diff = startOfWeek.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
+    const monday = new Date(startOfWeek.setDate(diff));
+    monday.setHours(0,0,0,0);
+
+    return workoutSessions.filter(
+      s => s.completedAt && new Date(s.completedAt).getTime() >= monday.getTime()
+    ).length;
+  }, [workoutSessions]);
+
+  const activeDaysForScore = useMemo(() => {
+    const activeId = profile.activeProgramIds[0];
+    if (!activeId) return [];
+    return workoutDays.filter(d => d.programId === activeId);
+  }, [profile.activeProgramIds, workoutDays]);
+
+  const disciplineScore = useMemo(() => {
+    const totalTargetWorkouts = activeDaysForScore.length || 3;
+    return Math.round((thisWeekSessionsCount / totalTargetWorkouts) * 100);
+  }, [thisWeekSessionsCount, activeDaysForScore.length]);
+
+  const currentStreak = useMemo(() => {
+    const completedDates = new Set(
+      workoutSessions
+        .filter(s => s.completedAt)
+        .map(s => s.completedAt!.split('T')[0])
+    );
+    
+    let streak = 0;
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    const todayStr = d.toISOString().split('T')[0];
+    
+    if (!completedDates.has(todayStr)) {
+      d.setDate(d.getDate() - 1);
+    }
+    
+    while (true) {
+      const dateStr = d.toISOString().split('T')[0];
+      if (completedDates.has(dateStr)) {
+        streak++;
+        d.setDate(d.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }, [workoutSessions]);
+
+  const highestStreak = useMemo(() => Math.max(profile.highestStreak, currentStreak), [profile.highestStreak, currentStreak]);
+  const levelInfo = useMemo(() => levelFromXP(profile.totalXP), [profile.totalXP]);
 
   const exportData = useCallback(() => {
-    const rows = ['Date,Metric,Category,Value,Note'];
-    for (const log of dailyLogs) {
-      const metric = metrics.find(m => m.id === log.metricId);
-      if (!metric) continue;
-      rows.push(`${log.date},"${metric.name}",${metric.category},${log.value},"${log.note ?? ''}"`);
-    }
-    for (const entry of journalEntries) {
-      rows.push(`${entry.date},Journal,reflection,${(entry.wordCount ?? 0)},"${entry.response.replace(/"/g, "'").substring(0, 100)}"`);
+    const rows = ['Date,Workout Day,Exercise,Set,Weight,Reps,RPE,PR'];
+    for (const session of workoutSessions) {
+      const day = workoutDays.find(d => d.id === session.workoutDayId);
+      const sessionLogs = exerciseLogs.filter(l => l.workoutSessionId === session.id);
+      
+      for (const log of sessionLogs) {
+        const ex = exercises.find(e => e.id === log.exerciseId);
+        const dateStr = session.completedAt ? session.completedAt.split('T')[0] : session.startedAt.split('T')[0];
+        rows.push(`${dateStr},"${day?.title || 'Unknown'}","${ex?.name || 'Unknown'}",${log.setNumber},${log.weight},${log.reps},${log.rpe || ''},${log.isPr ? 'Yes' : 'No'}`);
+      }
     }
     return rows.join('\n');
-  }, [dailyLogs, metrics, journalEntries]);
+  }, [workoutSessions, workoutDays, exerciseLogs, exercises]);
 
   const deleteAllData = useCallback(async () => {
-    await AsyncStorage.multiRemove(['profile', 'metrics', 'dailyLogs', 'journalEntries', 'relapseLogs', 'weekTaskProgress', 'themeMode']);
-    setProfile(DEFAULT_PROFILE);
-    setMetrics(DEFAULT_METRICS);
-    setDailyLogs([]);
-    setJournalEntries([]);
-    setRelapseLogs([]);
-    setWeekTaskProgress([]);
-    setFocusMinutesToday(0);
-    setThemeModeState('system');
-  }, []);
-
-  const logout = useCallback(async () => {
-    // Clear all session and user data from device storage
-    await AsyncStorage.multiRemove([
-      'userId',
-      'lastSessionName',
-      'lastSessionEmail',
-      'profile',
-      'metrics',
-      'dailyLogs',
-      'journalEntries',
-      'relapseLogs',
-      'weekTaskProgress',
-      'themeMode',
-    ]);
-    // Reset context state
+    await AsyncStorage.clear();
     setUserIdState(null);
     setProfile(DEFAULT_PROFILE);
-    setMetrics(DEFAULT_METRICS);
-    setDailyLogs([]);
-    setJournalEntries([]);
-    setRelapseLogs([]);
-    setWeekTaskProgress([]);
-    setFocusMinutesToday(0);
-    setThemeModeState('system');
+    setExercises([]);
+    setPrograms([]);
+    setWorkoutDays([]);
+    setWorkoutDayExercises([]);
+    setWorkoutSessions([]);
+    setExerciseLogs([]);
+    setJournals([]);
+    setCurrentWorkoutSession(null);
   }, []);
 
-  const login = useCallback(async (userId: string) => {
-    await AsyncStorage.setItem('userId', userId);
-    setUserIdState(userId);
-    
-    try {
-      const latest = await customFetch<any>(`/users/${userId}/data`);
-      if (latest) {
-        const programProgressDict: Record<string, any> = {};
-        if (latest.programProgress && Array.isArray(latest.programProgress)) {
-          latest.programProgress.forEach((p: any) => {
-            programProgressDict[p.programId] = {
-              currentWeek: p.currentWeek,
-              weekStartDate: p.weekStartDate,
-              completedWeeks: p.completedWeeks || [],
-              resetCount: p.resetCount || 0,
-            };
-          });
-        }
-        const finalProfile = {
-          ...DEFAULT_PROFILE,
-          ...latest.profile,
-          badges: latest.profile.badges || [],
-          programProgress: programProgressDict,
-        };
-        setProfile(finalProfile);
-        setMetrics(latest.metrics);
-        setDailyLogs(latest.dailyLogs);
-        setJournalEntries(latest.journalEntries);
-        setRelapseLogs(latest.relapseLogs);
-        setWeekTaskProgress(latest.weekTaskProgress);
-
-        const todayStr = getLocalDateString();
-        const todayFocus = latest.focusLogs.find((fl: any) => fl.date === todayStr);
-        if (todayFocus) {
-          setFocusMinutesToday(todayFocus.minutes);
-          await AsyncStorage.setItem(`focusMinutes_${todayStr}`, String(todayFocus.minutes));
-        }
-
-        await Promise.all([
-          AsyncStorage.setItem('profile', JSON.stringify(finalProfile)),
-          AsyncStorage.setItem('metrics', JSON.stringify(latest.metrics)),
-          AsyncStorage.setItem('dailyLogs', JSON.stringify(latest.dailyLogs)),
-          AsyncStorage.setItem('journalEntries', JSON.stringify(latest.journalEntries)),
-          AsyncStorage.setItem('relapseLogs', JSON.stringify(latest.relapseLogs)),
-          AsyncStorage.setItem('weekTaskProgress', JSON.stringify(latest.weekTaskProgress))
-        ]);
-        
-        console.log('Login synchronization complete');
-        
-        refreshPrograms(userId).catch(console.warn);
-
-        registerForPushNotificationsAsync().then(token => {
-          if (token) {
-            customFetch(`/users/${userId}/push-token`, {
-              method: 'POST',
-              body: JSON.stringify({ token })
-            }).catch(console.warn);
-          }
-        });
-      }
-    } catch (err) {
-      console.warn('Could not fetch cloud data on login:', err);
-    }
-  }, [refreshPrograms]);
-
   return (
-    <AppContext.Provider value={{
-      profile, metrics: filteredMetrics, dailyLogs, journalEntries, relapseLogs, weekTaskProgress,
-      disciplineScore, totalXP: profile.totalXP, currentStreak, graceStreakActive,
-      highestStreak, currentLevel: levelInfo.level, levelProgress: levelInfo.progress,
-      levelMax: levelInfo.max, badges: profile.badges, dayScore, completionPct,
-      availablePrograms, createCustomProgram, updateCustomProgram, deleteCustomProgram, publishProgram, correlationInsights,
-      updateProfile, logMetric, getLogForDate, getLogsForDate, getLogsForMetric,
-      addJournalEntry, getJournalEntryForDate, addRelapseLog,
-      toggleWeekTask, isWeekTaskComplete, addCustomMetric, deleteMetric,
-      focusMinutesToday, addFocusMinutes, addXP, getStreak, getStreakRisk,
-      getMissedDays, getRecentActivity, getMetricStreak, getMetricConsistency,
-      enrollProgram, unenrollProgram, toggleSavedProgram, advanceProgramWeek, restartProgramWeek,
-      getWeekGatingStatus, getProgramProgress, exportData, deleteAllData, logout, login,
-      pomodoroSettings, setPomodoroSettings,
-      themeMode, setThemeMode,
-      userId: userIdState,
-    }}>
+    <AppContext.Provider
+      value={{
+        profile,
+        exercises,
+        programs,
+        workoutDays,
+        workoutDayExercises,
+        workoutSessions,
+        exerciseLogs,
+        journals,
+        userIdState,
+        currentWorkoutSession,
+        themeMode,
+        setThemeMode,
+        updateProfile,
+        login,
+        logout,
+        registerAndSync,
+        startWorkoutSession,
+        logExerciseSet,
+        finishWorkoutSession,
+        cancelWorkoutSession,
+        addJournal,
+        createCustomProgram,
+        enrollProgram,
+        unenrollProgram,
+        currentStreak,
+        highestStreak,
+        currentLevel: levelInfo.level,
+        levelProgress: levelInfo.progress,
+        levelMax: levelInfo.max,
+        // Legacy / Stub compatibility values
+        totalXP: profile.totalXP,
+        userId: userIdState,
+        availablePrograms: programs,
+        updateCustomProgram,
+        toggleSavedProgram,
+        deleteCustomProgram,
+        publishProgram,
+        pomodoroSettings,
+        setPomodoroSettings,
+        addFocusMinutes,
+        focusMinutesToday,
+        dailyLogs: [],
+        journalEntries: journals,
+        metrics: [],
+        relapseLogs: [],
+        getJournalEntryForDate: (date: string) => journals.find(j => j.date === date),
+        getLogsForDate: (date: string) => [],
+        disciplineScore,
+        correlationInsights: [],
+        addRelapseLog,
+        badges: profile.badges || [],
+        getProgramProgress: (programId: string) => ({ currentWeek: 1, completedWeeks: [] }),
+        exportData,
+        deleteAllData,
+        addJournalEntry: addJournal,
+        addXP: async (amount: number) => {
+          setProfile(prev => {
+            const next = { ...prev, totalXP: prev.totalXP + amount };
+            AsyncStorage.setItem('profile', JSON.stringify(next));
+            return next;
+          });
+        },
+        weekTaskProgress: [],
+        isWeekTaskComplete: () => false,
+        getWeekGatingStatus: () => ({ gated: false, completed: 0, total: 0 }),
+      }}
+    >
       {children}
     </AppContext.Provider>
   );
 }
 
 export function useApp() {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error('useApp must be used within AppProvider');
-  return ctx;
+  const context = useContext(AppContext);
+  if (!context) {
+    throw new Error('useApp must be used within an AppProvider');
+  }
+  return context;
 }

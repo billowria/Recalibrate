@@ -1,6 +1,5 @@
 import { pgTable, text, timestamp, integer, boolean, real, jsonb, uuid, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
-import { z } from "zod";
 
 // Users
 export const users = pgTable("users", {
@@ -29,129 +28,80 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// Metrics
-export const metrics = pgTable("metrics", {
+// Exercises
+export const exercises = pgTable("exercises", {
   id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  category: text("category").notNull(), // 'build', 'reduce', 'neutral'
-  inputType: text("input_type").notNull(), // 'boolean', 'scale', 'counter'
-  scoreWeight: integer("score_weight").notNull().default(1),
-  isCustom: boolean("is_custom").default(false),
-  implementationIntention: text("implementation_intention"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// Daily Logs
-export const dailyLogs = pgTable("daily_logs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  metricId: uuid("metric_id").references(() => metrics.id, { onDelete: "cascade" }).notNull(),
-  date: text("date").notNull(), // YYYY-MM-DD
-  value: real("value").notNull(),
-  note: text("note"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// Journal Entries
-export const journalEntries = pgTable("journal_entries", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  date: text("date").notNull(),
-  prompt: text("prompt").notNull(),
-  response: text("response").notNull(),
-  mood: integer("mood"),
-  energy: integer("energy"),
-  freeResponse: text("free_response"),
-  isWeeklyReflection: boolean("is_weekly_reflection").default(false).notNull(),
-  programContext: jsonb("program_context").$type<{ missedTaskIds?: string[]; hitTaskIds?: string[]; programId?: string }>(),
-  tags: jsonb("tags").$type<string[]>().default([]),
-  wordCount: integer("word_count").default(0),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// Relapse Logs
-export const relapseLogs = pgTable("relapse_logs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  metricId: uuid("metric_id").references(() => metrics.id, { onDelete: "cascade" }).notNull(),
-  date: text("date").notNull(),
-  triggerCategory: text("trigger_category").notNull(),
-  triggerReflection: text("trigger_reflection").notNull(),
-  nextAction: text("next_action").notNull(),
-  compassionStatement: text("compassion_statement"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// Program Progress
-export const programProgress = pgTable("program_progress", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  programId: text("program_id").notNull(),
-  currentWeek: integer("current_week").notNull().default(1),
-  weekStartDate: text("week_start_date").notNull(),
-  completedWeeks: jsonb("completed_weeks").$type<number[]>().default([]),
-  resetCount: integer("reset_count").default(0),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// Week Task Progress
-export const weekTaskProgress = pgTable("week_task_progress", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  programId: text("program_id").notNull(),
-  weekNumber: integer("week_number").notNull(),
-  taskId: text("task_id").notNull(),
-  completed: boolean("completed").default(false).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// Focus Logs
-export const focusLogs = pgTable("focus_logs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  date: text("date").notNull(), // YYYY-MM-DD
-  minutes: integer("minutes").notNull().default(0),
+  muscleGroup: text("muscle_group").notNull(),
+  equipment: text("equipment"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // Programs
 export const programs = pgTable("programs", {
-  id: text("id").primaryKey(), // We use text because of slugs like "eight-week-recovery"
+  id: text("id").primaryKey(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
-  emoji: text("emoji").notNull(),
-  description: text("description").notNull(),
-  totalWeeks: integer("total_weeks").notNull(),
-  isSystem: boolean("is_system").default(true).notNull(),
-  color: text("color").notNull(),
-  authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
-  isPublished: boolean("is_published").default(false).notNull(),
-  forkedFromId: text("forked_from_id"),
+  description: text("description"),
+  isTemplate: boolean("is_template").default(false).notNull(),
+  color: text("color").default("#7C3AED").notNull(),
+  emoji: text("emoji").default("💪").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// Program Weeks
-export const programWeeks = pgTable("program_weeks", {
-  id: text("id").primaryKey(),
+// Workout Days
+export const workoutDays = pgTable("workout_days", {
+  id: uuid("id").primaryKey().defaultRandom(),
   programId: text("program_id").references(() => programs.id, { onDelete: "cascade" }).notNull(),
-  weekNumber: integer("week_number").notNull(),
-  theme: text("theme").notNull(),
-  goal: text("goal").notNull(),
-  psychologyRationale: text("psychology_rationale").notNull(),
-  dailyJournalPrompt: text("daily_journal_prompt"),
-  weeklyReflectionPrompt: text("weekly_reflection_prompt"),
+  dayNumber: integer("day_number").notNull(),
+  title: text("title").notNull(),
+  targetMuscleGroups: jsonb("target_muscle_groups").$type<string[]>().default([]).notNull(),
 });
 
-// Program Tasks
-export const programTasks = pgTable("program_tasks", {
-  id: text("id").primaryKey(),
-  weekId: text("week_id").references(() => programWeeks.id, { onDelete: "cascade" }).notNull(),
-  title: text("title").notNull(),
-  description: text("description").notNull(),
-  isHabit: boolean("is_habit").default(false).notNull(),
-  metricCategory: text("metric_category"), // 'build' or 'reduce'
-  metricInputType: text("metric_input_type"), // 'boolean', 'counter', 'scale'
-  metricUnitLabel: text("metric_unit_label"),
-  metricScoreWeight: integer("metric_score_weight"),
+// Workout Day Exercises
+export const workoutDayExercises = pgTable("workout_day_exercises", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workoutDayId: uuid("workout_day_id").references(() => workoutDays.id, { onDelete: "cascade" }).notNull(),
+  exerciseId: uuid("exercise_id").references(() => exercises.id, { onDelete: "cascade" }).notNull(),
+  sortOrder: integer("sort_order").notNull(),
+  targetSets: integer("target_sets").default(3).notNull(),
+  targetReps: integer("target_reps").default(10).notNull(),
+  targetRpe: integer("target_rpe").default(8),
+});
+
+// Workout Sessions
+export const workoutSessions = pgTable("workout_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  workoutDayId: uuid("workout_day_id").references(() => workoutDays.id, { onDelete: "set null" }),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  volumeScore: integer("volume_score").default(0).notNull(),
+});
+
+// Exercise Logs
+export const exerciseLogs = pgTable("exercise_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workoutSessionId: uuid("workout_session_id").references(() => workoutSessions.id, { onDelete: "cascade" }).notNull(),
+  exerciseId: uuid("exercise_id").references(() => exercises.id, { onDelete: "cascade" }).notNull(),
+  setNumber: integer("set_number").notNull(),
+  weight: real("weight").notNull(),
+  reps: integer("reps").notNull(),
+  rpe: integer("rpe"),
+  isPr: boolean("is_pr").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Journals
+export const journals = pgTable("journals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  date: text("date").notNull(),
+  content: text("content").notNull(),
+  mood: text("mood"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Friendships
@@ -170,35 +120,26 @@ export const friendships = pgTable("friendships", {
 export const insertUserSchema = createInsertSchema(users);
 export const selectUserSchema = createSelectSchema(users);
 
-export const insertMetricSchema = createInsertSchema(metrics);
-export const selectMetricSchema = createSelectSchema(metrics);
-
-export const insertDailyLogSchema = createInsertSchema(dailyLogs);
-export const selectDailyLogSchema = createSelectSchema(dailyLogs);
-
-export const insertJournalEntrySchema = createInsertSchema(journalEntries);
-export const selectJournalEntrySchema = createSelectSchema(journalEntries);
-
-export const insertRelapseLogSchema = createInsertSchema(relapseLogs);
-export const selectRelapseLogSchema = createSelectSchema(relapseLogs);
-
-export const insertProgramProgressSchema = createInsertSchema(programProgress);
-export const selectProgramProgressSchema = createSelectSchema(programProgress);
-
-export const insertWeekTaskProgressSchema = createInsertSchema(weekTaskProgress);
-export const selectWeekTaskProgressSchema = createSelectSchema(weekTaskProgress);
-
-export const insertFocusLogSchema = createInsertSchema(focusLogs);
-export const selectFocusLogSchema = createSelectSchema(focusLogs);
+export const insertExerciseSchema = createInsertSchema(exercises);
+export const selectExerciseSchema = createSelectSchema(exercises);
 
 export const insertProgramSchema = createInsertSchema(programs);
 export const selectProgramSchema = createSelectSchema(programs);
 
-export const insertProgramWeekSchema = createInsertSchema(programWeeks);
-export const selectProgramWeekSchema = createSelectSchema(programWeeks);
+export const insertWorkoutDaySchema = createInsertSchema(workoutDays);
+export const selectWorkoutDaySchema = createSelectSchema(workoutDays);
 
-export const insertProgramTaskSchema = createInsertSchema(programTasks);
-export const selectProgramTaskSchema = createSelectSchema(programTasks);
+export const insertWorkoutDayExerciseSchema = createInsertSchema(workoutDayExercises);
+export const selectWorkoutDayExerciseSchema = createSelectSchema(workoutDayExercises);
+
+export const insertWorkoutSessionSchema = createInsertSchema(workoutSessions);
+export const selectWorkoutSessionSchema = createSelectSchema(workoutSessions);
+
+export const insertExerciseLogSchema = createInsertSchema(exerciseLogs);
+export const selectExerciseLogSchema = createSelectSchema(exerciseLogs);
+
+export const insertJournalSchema = createInsertSchema(journals);
+export const selectJournalSchema = createSelectSchema(journals);
 
 export const insertFriendshipSchema = createInsertSchema(friendships);
 export const selectFriendshipSchema = createSelectSchema(friendships);

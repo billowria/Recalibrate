@@ -5,10 +5,12 @@
  * FitBuddy API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { UserProfileSync } from './userProfileSync';
 
-export interface LoginResponse {
+export interface WorkoutSessionSync {
+  id: string;
   userId: string;
-  onboardingComplete: boolean;
-  profile: UserProfileSync;
+  workoutDayId?: string | null;
+  startedAt: Date;
+  completedAt?: Date | null;
+  volumeScore: number;
 }

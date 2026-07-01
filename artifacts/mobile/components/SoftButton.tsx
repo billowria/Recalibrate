@@ -60,8 +60,8 @@ export function SoftButton({
 
   // Determine background
   let bgGradient = gradient;
-  let bgColor = colors.surface;
-  let textColor = colors.text;
+  let bgColor: string = colors.surface;
+  let textColor: string = colors.text;
 
   if (primary) {
     bgGradient = colors.gradients.primary;

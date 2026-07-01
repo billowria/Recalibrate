@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -12,30 +12,16 @@ import {
   TouchableOpacity,
   View,
   Dimensions,
+  Modal,
+  FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/context/AppContext';
 import { useColors } from '@/hooks/useColors';
-import { CommitmentButton } from '@/components/CommitmentButton';
-import { Program, ProgramWeek, WeekTask } from '@/constants/program';
-import { BRAND, RADIUS } from '@/constants/colors';
-import * as ImagePicker from 'expo-image-picker';
-import Reanimated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  withTiming,
-  FadeIn,
-  FadeOut,
-  FadeInRight,
-  FadeInLeft,
-} from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-// ─── Config ──────────────────────────────────────────────────────────────────
 
 const COLOR_OPTIONS = [
   '#6366f1', '#f59e0b', '#10b981', '#ef4444',
@@ -43,541 +29,542 @@ const COLOR_OPTIONS = [
   '#14b8a6', '#0ea5e9', '#eab308', '#f43f5e'
 ];
 
-const EMOJI_OPTIONS = ['🧭', '🌅', '🧠', '💪', '🧘', '💧', '🥗', '📚', '📈', '🚀', '🔥', '🛡️', '🌿', '🎯', '⚡', '🏆'];
+const EMOJI_OPTIONS = ['💪', '🏋️‍♂️', '🏃‍♂️', '🧘', '⚡', '🏆', '🔥', '🎯', '🥗', '🧠', '🛡️', '🌿'];
 
-const TASK_TYPES = [
-  { key: 'action', label: 'Build Habit', icon: 'flash-outline' as const, color: '#22c55e' },
-  { key: 'reduction', label: 'Reduce Habit', icon: 'trending-down-outline' as const, color: '#ef4444' },
-  { key: 'reflection', label: 'Checklist Task', icon: 'checkbox-outline' as const, color: '#6366f1' },
-] as const;
-
-// ─── Swiss Typography & Inputs ──────────────────────────────────────────────
-
-function SwissInput({ label, value, onChange, placeholder, color, colors, multiline = false, autoFocus = false }: any) {
-  const [focused, setFocused] = useState(false);
-  const borderAnim = useSharedValue(0);
-
-  useEffect(() => {
-    borderAnim.value = withSpring(focused ? 1 : 0);
-  }, [focused]);
-
-  const animStyle = useAnimatedStyle(() => ({
-    borderColor: focused ? color : colors.border,
-    backgroundColor: focused ? `${color}05` : colors.background,
-  }));
-
-  return (
-    <View style={styles.inputWrap}>
-      <Text style={[styles.inputLabel, { color: focused ? color : colors.textSecondary }]}>{label}</Text>
-      <Reanimated.View style={[styles.inputContainer, animStyle]}>
-        <TextInput
-          value={value}
-          onChangeText={onChange}
-          placeholder={placeholder}
-          placeholderTextColor={colors.textMuted}
-          style={[styles.swissInput, { color: colors.text }, multiline && { height: 100, paddingTop: 16 }]}
-          multiline={multiline}
-          autoFocus={autoFocus}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-        />
-      </Reanimated.View>
-    </View>
-  );
-}
-
-// ─── Blueprint Card (Week Editor) ───────────────────────────────────────────
-
-function BlueprintCard({ week, weekIndex, programColor, onUpdate, colors }: any) {
-  const [expanded, setExpanded] = useState(false);
-
-  const updateField = (field: string, val: string) => {
-    onUpdate(weekIndex, { [field]: val });
-  };
-
-  const addTask = () => {
-    const newTask: WeekTask = {
-      id: `t-${Date.now()}`,
-      title: '',
-      description: '',
-      type: 'action' as any,
-      isPersistent: false,
-      isHabit: true,
-      metricCategory: 'build',
-      metricInputType: 'boolean',
-      metricScoreWeight: 5,
-      metricUnitLabel: '',
-    };
-    onUpdate(weekIndex, { tasks: [...week.tasks, newTask] });
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
-
-  const updateTask = (tIdx: number, field: string, val: any) => {
-    const nextTasks = [...week.tasks];
-    const task = { ...nextTasks[tIdx], [field]: val } as any;
-    if (field === 'type') {
-      task.isHabit = val !== 'reflection';
-      task.metricCategory = val === 'reduction' ? 'reduce' : 'build';
-    }
-    nextTasks[tIdx] = task;
-    onUpdate(weekIndex, { tasks: nextTasks });
-  };
-
-  const removeTask = (tIdx: number) => {
-    const nextTasks = [...week.tasks];
-    nextTasks.splice(tIdx, 1);
-    onUpdate(weekIndex, { tasks: nextTasks });
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-  };
-
-  return (
-    <View style={[styles.bpCard, { backgroundColor: expanded ? colors.surfaceHigh : colors.background, borderColor: expanded ? programColor : colors.border }]}>
-      <TouchableOpacity 
-        style={styles.bpHeader} 
-        activeOpacity={0.7}
-        onPress={() => { setExpanded(!expanded); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-      >
-        <View style={[styles.bpBadge, { backgroundColor: `${programColor}15` }]}>
-          <Text style={[styles.bpBadgeText, { color: programColor }]}>W{week.weekNumber}</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.bpTitle, { color: colors.text }]}>{week.theme || 'Untitled Week'}</Text>
-          <Text style={[styles.bpSub, { color: colors.textSecondary }]}>{week.tasks.length} tasks configured</Text>
-        </View>
-        <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={20} color={colors.textSecondary} />
-      </TouchableOpacity>
-
-      {expanded && (
-        <Reanimated.View entering={FadeIn} style={styles.bpContent}>
-          <SwissInput label="WEEKLY THEME" value={week.theme} onChange={(v: string) => updateField('theme', v)} placeholder="e.g. Foundation Building" color={programColor} colors={colors} />
-          <SwissInput label="GOAL" value={week.goal} onChange={(v: string) => updateField('goal', v)} placeholder="What must be achieved?" color={programColor} colors={colors} />
-          <SwissInput label="BEHAVIORAL RATIONALE (OPTIONAL)" value={week.psychologyRationale} onChange={(v: string) => updateField('psychologyRationale', v)} placeholder="Why does this matter?" color={programColor} colors={colors} multiline />
-          
-          <View style={styles.bpTasksWrap}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>HABITS & TASKS</Text>
-            {week.tasks.map((task: any, idx: number) => (
-              <View key={task.id} style={[styles.bpTask, { backgroundColor: colors.surfaceMid, borderColor: colors.border }]}>
-                <View style={styles.bpTaskHeader}>
-                  <TouchableOpacity 
-                    onPress={() => updateTask(idx, 'type', task.type === 'action' ? 'reduction' : task.type === 'reduction' ? 'reflection' : 'action')}
-                    style={[styles.taskTypeBadge, { backgroundColor: `${TASK_TYPES.find(t=>t.key===task.type)?.color}15` }]}
-                  >
-                    <Ionicons name={TASK_TYPES.find(t=>t.key===task.type)?.icon as any} size={12} color={TASK_TYPES.find(t=>t.key===task.type)?.color} />
-                    <Text style={[styles.taskTypeText, { color: TASK_TYPES.find(t=>t.key===task.type)?.color }]}>
-                      {TASK_TYPES.find(t=>t.key===task.type)?.label}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => removeTask(idx)}>
-                    <Ionicons name="trash" size={16} color={BRAND.danger} />
-                  </TouchableOpacity>
-                </View>
-                <TextInput
-                  value={task.title} onChangeText={(v) => updateTask(idx, 'title', v)}
-                  placeholder="Task title..." placeholderTextColor={colors.textMuted}
-                  style={[styles.taskTitleInput, { color: colors.text }]}
-                />
-              </View>
-            ))}
-            <TouchableOpacity onPress={addTask} style={[styles.addTaskBtn, { borderColor: programColor }]} activeOpacity={0.7}>
-              <Ionicons name="add" size={16} color={programColor} />
-              <Text style={[styles.addTaskText, { color: programColor }]}>Add Task</Text>
-            </TouchableOpacity>
-          </View>
-        </Reanimated.View>
-      )}
-    </View>
-  );
-}
-
-// ─── Main Screen ─────────────────────────────────────────────────────────────
+const MUSCLE_GROUPS = [
+  'Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps',
+  'Quads', 'Hamstrings', 'Calves', 'Abs/Core', 'Full Body'
+];
 
 export default function ProgramBuilderScreen() {
-  const { profile, userId, availablePrograms, createCustomProgram, updateCustomProgram } = useApp();
+  const {
+    exercises,
+    programs,
+    workoutDays,
+    workoutDayExercises,
+    createCustomProgram,
+    updateCustomProgram
+  } = useApp();
+
   const colors = useColors();
   const params = useLocalSearchParams();
   const id = params.id as string | undefined;
   const isEdit = !!id;
   const insets = useSafeAreaInsets();
 
-  // Navigation
-  const [step, setStep] = useState(0);
-
-  // Payload State
+  const [step, setStep] = useState(1); // 1 = General, 2 = Days
   const [title, setTitle] = useState('');
-  const [emoji, setEmoji] = useState('🚀');
-  const [color, setColor] = useState('#6366f1');
-  const [identityStatement, setIdentityStatement] = useState('');
-  const [stakes, setStakes] = useState('');
-  const [gatingThreshold, setGatingThreshold] = useState('50'); // Default 50%
-  const [totalWeeks, setTotalWeeks] = useState(4);
-  const [weeks, setWeeks] = useState<ProgramWeek[]>([]);
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [description, setDescription] = useState('');
+  const [color, setColor] = useState(COLOR_OPTIONS[0]);
+  const [emoji, setEmoji] = useState(EMOJI_OPTIONS[0]);
 
-  // Init
+  // Days list state
+  interface BuilderExercise {
+    exerciseId: string;
+    name: string;
+    targetSets: number;
+    targetReps: number;
+    targetRpe: number;
+  }
+
+  interface BuilderDay {
+    id?: string;
+    title: string;
+    dayNumber: number;
+    targetMuscleGroups: string[];
+    exercises: BuilderExercise[];
+  }
+
+  const [days, setDays] = useState<BuilderDay[]>([
+    { title: 'Day 1: Push', dayNumber: 1, targetMuscleGroups: ['Chest', 'Shoulders', 'Triceps'], exercises: [] }
+  ]);
+
+  // Exercise selection modal state
+  const [exModalOpen, setExModalOpen] = useState(false);
+  const [targetDayIndex, setTargetDayIndex] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Load existing data if edit mode
   useEffect(() => {
     if (isEdit && id) {
-      const existing = availablePrograms.find(p => p.id === id);
+      const existing = programs.find(p => p.id === id);
       if (existing) {
         setTitle(existing.title);
-        setEmoji(existing.emoji);
+        setDescription(existing.description || '');
         setColor(existing.color);
-        setTotalWeeks(existing.totalWeeks);
-        setWeeks(JSON.parse(JSON.stringify(existing.weeks)));
-        
-        // Deserialize custom fields from description if present
-        try {
-          if (existing.description.startsWith('{')) {
-            const parsed = JSON.parse(existing.description);
-            setIdentityStatement(parsed.identityStatement || '');
-            setStakes(parsed.stakes || '');
-            setGatingThreshold(parsed.gatingThreshold || '50');
-            setImageBase64(parsed.customImageBase64 || null);
-          } else {
-            setIdentityStatement(existing.description);
-          }
-        } catch {
-          setIdentityStatement(existing.description);
+        setEmoji(existing.emoji);
+
+        // Find days
+        const progDays = workoutDays
+          .filter(d => d.programId === id)
+          .sort((a, b) => a.dayNumber - b.dayNumber);
+
+        const loadedDays = progDays.map(d => {
+          const dayExs = workoutDayExercises
+            .filter(de => de.workoutDayId === d.id)
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+            .map(de => {
+              const exDetails = exercises.find(e => e.id === de.exerciseId);
+              return {
+                exerciseId: de.exerciseId,
+                name: exDetails ? exDetails.name : 'Unknown Exercise',
+                targetSets: de.targetSets,
+                targetReps: de.targetReps,
+                targetRpe: de.targetRpe || 8
+              };
+            });
+
+          return {
+            id: d.id,
+            title: d.title,
+            dayNumber: d.dayNumber,
+            targetMuscleGroups: d.targetMuscleGroups,
+            exercises: dayExs
+          };
+        });
+
+        if (loadedDays.length > 0) {
+          setDays(loadedDays);
         }
       }
-    } else {
-      // Init empty weeks
-      const initialWeeks = Array.from({ length: 4 }).map((_, i) => ({
-        weekNumber: i + 1, theme: '', goal: '', psychologyRationale: '', tasks: [], dailyJournalPrompt: ''
-      })) as any;
-      setWeeks(initialWeeks);
     }
-  }, [id, isEdit]);
+  }, [isEdit, id, programs, workoutDays, workoutDayExercises, exercises]);
 
-  // Sync weeks array length
-  useEffect(() => {
-    setWeeks(prev => {
-      const next = [...prev];
-      while (next.length < totalWeeks) {
-        next.push({ weekNumber: next.length + 1, theme: '', goal: '', psychologyRationale: '', tasks: [], dailyJournalPrompt: '' } as any);
+  const addDay = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setDays(prev => [
+      ...prev,
+      {
+        title: `Day ${prev.length + 1}: Routine`,
+        dayNumber: prev.length + 1,
+        targetMuscleGroups: [],
+        exercises: []
       }
-      if (next.length > totalWeeks) next.splice(totalWeeks);
-      return next;
-    });
-  }, [totalWeeks]);
-
-  const handleUpdateWeek = (idx: number, updated: any) => {
-    setWeeks(prev => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], ...updated };
-      return next;
-    });
+    ]);
   };
 
-  const saveProtocol = async () => {
-    if (!title.trim()) { Alert.alert('Required', 'Please enter a protocol title.'); return; }
+  const removeDay = (index: number) => {
+    if (days.length <= 1) {
+      Alert.alert('Cannot Remove', 'Your routine split must contain at least 1 day.');
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    setDays(prev => prev.filter((_, i) => i !== index).map((d, i) => ({ ...d, dayNumber: i + 1 })));
+  };
+
+  const updateDayField = (index: number, key: keyof BuilderDay, value: any) => {
+    setDays(prev => prev.map((d, i) => i === index ? { ...d, [key]: value } : d));
+  };
+
+  const toggleMuscleGroup = (dayIndex: number, group: string) => {
+    const day = days[dayIndex];
+    const exists = day.targetMuscleGroups.includes(group);
+    const updatedGroups = exists
+      ? day.targetMuscleGroups.filter(g => g !== group)
+      : [...day.targetMuscleGroups, group];
+    updateDayField(dayIndex, 'targetMuscleGroups', updatedGroups);
+  };
+
+  const openAddExercise = (dayIndex: number) => {
+    setTargetDayIndex(dayIndex);
+    setSearchQuery('');
+    setExModalOpen(true);
+  };
+
+  const handleSelectExercise = (ex: any) => {
+    if (targetDayIndex === null) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
-    // Serialize behavioral fields into description to satisfy DB schema
-    const serializedDesc = JSON.stringify({
-      identityStatement,
-      stakes,
-      gatingThreshold,
-      text: identityStatement,
-      customImageBase64: imageBase64
-    });
+    const day = days[targetDayIndex];
+    // Check if already in day
+    if (day.exercises.some(e => e.exerciseId === ex.id)) {
+      Alert.alert('Duplicate Exercise', 'This exercise is already added to this split day.');
+      return;
+    }
+
+    const updatedExs = [
+      ...day.exercises,
+      {
+        exerciseId: ex.id,
+        name: ex.name,
+        targetSets: 3,
+        targetReps: 10,
+        targetRpe: 8
+      }
+    ];
+
+    updateDayField(targetDayIndex, 'exercises', updatedExs);
+    setExModalOpen(false);
+  };
+
+  const removeExerciseFromDay = (dayIndex: number, exId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const day = days[dayIndex];
+    const updatedExs = day.exercises.filter(e => e.exerciseId !== exId);
+    updateDayField(dayIndex, 'exercises', updatedExs);
+  };
+
+  const updateExerciseTarget = (dayIndex: number, exId: string, key: keyof BuilderExercise, val: number) => {
+    const day = days[dayIndex];
+    const updatedExs = day.exercises.map(e => e.exerciseId === exId ? { ...e, [key]: val } : e);
+    updateDayField(dayIndex, 'exercises', updatedExs);
+  };
+
+  const filteredExercises = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return exercises.filter(e => e.name.toLowerCase().includes(q) || e.muscleGroup.toLowerCase().includes(q));
+  }, [exercises, searchQuery]);
+
+  const handleSave = async () => {
+    if (!title.trim()) {
+      Alert.alert('Required Field', 'Please enter a name for your workout split routine.');
+      return;
+    }
+
+    // Ensure all days have at least 1 exercise
+    const invalidDay = days.find(d => d.exercises.length === 0);
+    if (invalidDay) {
+      Alert.alert('Empty Routine Day', `Please add at least one exercise to "${invalidDay.title}".`);
+      return;
+    }
 
     try {
-      const payload = { 
-        title, 
-        emoji, 
-        description: serializedDesc, 
-        color, 
-        totalWeeks, 
-        weeks,
-        authorId: userId || undefined
-      };
-      if (isEdit && id) { await updateCustomProgram(id, payload); }
-      else { await createCustomProgram(payload); }
+      if (isEdit && id) {
+        await updateCustomProgram(id, { title, description, emoji, color }, days);
+      } else {
+        await createCustomProgram({ title, description, emoji, color }, days);
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
-    } catch (e) {
-      console.error(e);
-      Alert.alert('Error', 'Failed to save protocol.');
+    } catch (err) {
+      Alert.alert('Save Failed', 'There was an error saving your custom routine split.');
     }
   };
 
-  // ─── Step Renders ───────────────────────────────────────────────────────────
-
-  const renderStep0 = () => (
-    <Reanimated.View entering={FadeInRight} exiting={FadeOut} style={styles.stepContainer}>
-      <Text style={[styles.stepTitle, { color: colors.text }]}>The Vision.</Text>
-      <Text style={[styles.stepSub, { color: colors.textSecondary }]}>Every transformation starts with clarity.</Text>
-      
-      <View style={{ marginHorizontal: -24, marginBottom: 32 }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.emojiGrid}>
-          {EMOJI_OPTIONS.map(e => (
-            <TouchableOpacity key={e} onPress={() => { setEmoji(e); Haptics.selectionAsync(); }} style={[styles.emojiCell, { backgroundColor: emoji === e ? `${color}20` : colors.surfaceHigh, borderColor: emoji === e ? color : 'transparent' }]}>
-              <Text style={{ fontSize: 24 }}>{e}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-
-      <View style={styles.inputWrap}>
-        <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>CUSTOM COVER IMAGE (OPTIONAL)</Text>
-        <TouchableOpacity 
-          onPress={async () => {
-            let result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ['images'],
-              allowsEditing: true,
-              aspect: [16, 9],
-              quality: 0.3,
-              base64: true,
-            });
-            if (!result.canceled && result.assets && result.assets[0].base64) {
-              setImageBase64(`data:image/jpeg;base64,${result.assets[0].base64}`);
-            }
-          }}
-          style={[styles.imagePickerBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
-          activeOpacity={0.7}
-        >
-          {imageBase64 ? (
-            <Reanimated.Image source={{ uri: imageBase64 }} style={styles.imagePickerPreview} />
-          ) : (
-            <>
-              <Ionicons name="image-outline" size={24} color={colors.textMuted} />
-              <Text style={{ color: colors.textMuted, fontSize: 13, fontFamily: 'Inter_500Medium', marginTop: 8 }}>Tap to upload cover image</Text>
-            </>
-          )}
-        </TouchableOpacity>
-        {imageBase64 && (
-          <TouchableOpacity onPress={() => setImageBase64(null)} style={{ position: 'absolute', top: 32, right: 8, padding: 8, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 16 }}>
-             <Ionicons name="close" size={16} color="#fff" />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <SwissInput label="PROTOCOL TITLE" value={title} onChange={setTitle} placeholder="e.g. Dopamine Detox" color={color} colors={colors} autoFocus />
-      <SwissInput label="IDENTITY STATEMENT" value={identityStatement} onChange={setIdentityStatement} placeholder="I am becoming someone who..." color={color} colors={colors} multiline />
-      <SwissInput label="THE STAKES (Optional)" value={stakes} onChange={setStakes} placeholder="If I break this protocol, I will..." color={BRAND.danger} colors={colors} />
-    </Reanimated.View>
-  );
-
-  const renderStep1 = () => (
-    <Reanimated.View entering={FadeInRight} exiting={FadeOut} style={styles.stepContainer}>
-      <Text style={[styles.stepTitle, { color: colors.text }]}>The Architecture.</Text>
-      <Text style={[styles.stepSub, { color: colors.textSecondary }]}>Design the structure of your transformation.</Text>
-      
-      <Text style={[styles.inputLabel, { color: colors.textSecondary, marginTop: 20 }]}>THEME COLOR</Text>
-      <View style={{ marginHorizontal: -24, marginBottom: 32 }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.colorGrid}>
-          {COLOR_OPTIONS.map(c => (
-            <TouchableOpacity key={c} onPress={() => { setColor(c); Haptics.selectionAsync(); }} style={[styles.colorCell, { backgroundColor: c, borderWidth: color === c ? 3 : 0, borderColor: colors.background }]} />
-          ))}
-        </ScrollView>
-      </View>
-
-      <Text style={[styles.inputLabel, { color: colors.textSecondary, marginTop: 30 }]}>DURATION: {totalWeeks} WEEKS</Text>
-      <View style={styles.durationRow}>
-        <TouchableOpacity onPress={() => { setTotalWeeks(Math.max(1, totalWeeks - 1)); Haptics.selectionAsync(); }} style={[styles.durBtn, { backgroundColor: colors.surfaceHigh }]}>
-          <Ionicons name="remove" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <View style={styles.durDisplay}>
-          <Text style={[styles.durText, { color: colors.text }]}>{totalWeeks}</Text>
-        </View>
-        <TouchableOpacity onPress={() => { setTotalWeeks(Math.min(12, totalWeeks + 1)); Haptics.selectionAsync(); }} style={[styles.durBtn, { backgroundColor: colors.surfaceHigh }]}>
-          <Ionicons name="add" size={24} color={colors.text} />
-        </TouchableOpacity>
-      </View>
-
-      <SwissInput label="GATING THRESHOLD (%)" value={gatingThreshold} onChange={setGatingThreshold} placeholder="e.g. 50" color={color} colors={colors} />
-      <Text style={[styles.helperText, { color: colors.textMuted }]}>Percentage of habits that must be completed to unlock the next week.</Text>
-    </Reanimated.View>
-  );
-
-  const renderStep2 = () => (
-    <Reanimated.View entering={FadeInRight} exiting={FadeOut} style={[styles.stepContainer, { paddingHorizontal: 0 }]}>
-      <View style={{ paddingHorizontal: 24, marginBottom: 20 }}>
-        <Text style={[styles.stepTitle, { color: colors.text }]}>The Blueprints.</Text>
-        <Text style={[styles.stepSub, { color: colors.textSecondary }]}>Define the habits and goals for each week.</Text>
-      </View>
-      
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, gap: 16, paddingBottom: 150 }} showsVerticalScrollIndicator={false}>
-        {weeks.map((w, i) => (
-          <BlueprintCard key={i} week={w} weekIndex={i} programColor={color} onUpdate={handleUpdateWeek} colors={colors} />
-        ))}
-      </ScrollView>
-    </Reanimated.View>
-  );
-
-  const renderStep3 = () => (
-    <Reanimated.View entering={FadeInRight} exiting={FadeOut} style={styles.stepContainer}>
-      <Text style={[styles.stepTitle, { color: colors.text }]}>Initialization.</Text>
-      <Text style={[styles.stepSub, { color: colors.textSecondary }]}>Review your flight path.</Text>
-      
-      <View style={[styles.flightPathCard, { backgroundColor: `${color}10`, borderColor: `${color}30` }]}>
-        <Text style={{ fontSize: 48, marginBottom: 12 }}>{emoji}</Text>
-        <Text style={[styles.fpTitle, { color: colors.text }]}>{title || 'Untitled Protocol'}</Text>
-        <Text style={[styles.fpIdentity, { color: colors.textSecondary }]}>{identityStatement || 'No identity statement set.'}</Text>
-        
-        <View style={styles.fpStatsRow}>
-          <View style={styles.fpStat}>
-            <Text style={[styles.fpStatVal, { color: color }]}>{totalWeeks}</Text>
-            <Text style={[styles.fpStatLabel, { color: colors.textMuted }]}>Weeks</Text>
-          </View>
-          <View style={styles.fpStat}>
-            <Text style={[styles.fpStatVal, { color: color }]}>{weeks.reduce((acc, w) => acc + w.tasks.length, 0)}</Text>
-            <Text style={[styles.fpStatLabel, { color: colors.textMuted }]}>Habits</Text>
-          </View>
-          <View style={styles.fpStat}>
-            <Text style={[styles.fpStatVal, { color: color }]}>{gatingThreshold}%</Text>
-            <Text style={[styles.fpStatLabel, { color: colors.textMuted }]}>Gating</Text>
-          </View>
-        </View>
-
-        {stakes ? (
-          <View style={[styles.stakesBadge, { backgroundColor: `${BRAND.danger}20` }]}>
-            <Ionicons name="warning" size={14} color={BRAND.danger} />
-            <Text style={[styles.stakesText, { color: BRAND.danger }]} numberOfLines={2}>Penalty: {stakes}</Text>
-          </View>
-        ) : null}
-      </View>
-
-      <View style={{ marginTop: 24, marginBottom: 40 }}>
-        <CommitmentButton
-          onComplete={async () => saveProtocol()}
-          label={isEdit ? 'UPDATE PROGRAM' : 'INITIALIZE PROGRAM'}
-          color={color}
-          icon="rocket"
-          duration={1500}
-        />
-      </View>
-    </Reanimated.View>
-  );
-
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.root, { backgroundColor: colors.background }]}>
-      {/* Swiss Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <View style={styles.stepDots}>
-          {[0, 1, 2, 3].map(i => (
-            <View key={i} style={[styles.dot, { backgroundColor: step >= i ? color : colors.border, opacity: step >= i ? 1 : 0.5, width: step === i ? 24 : 8 }]} />
-          ))}
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
+      {/* Exercise Picker Modal */}
+      <Modal visible={exModalOpen} animationType="slide" transparent>
+        <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.8)' }]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surfaceMid, borderColor: colors.border }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Select Exercise</Text>
+              <TouchableOpacity onPress={() => setExModalOpen(false)}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.searchBarContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Ionicons name="search" size={16} color={colors.textMuted} />
+              <TextInput
+                style={[styles.searchInput, { color: colors.text }]}
+                placeholder="Search Bench Press, Squat, Pullups..."
+                placeholderTextColor={colors.textMuted}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+            </View>
+
+            <FlatList
+              data={filteredExercises}
+              keyExtractor={item => item.id}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  onPress={() => handleSelectExercise(item)}
+                  style={[styles.exerciseItem, { borderBottomColor: colors.border }]}
+                >
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={[styles.exerciseItemName, { color: colors.text }]}>{item.name}</Text>
+                    <Text style={{ fontSize: 11, color: colors.textSecondary }}>{item.muscleGroup}</Text>
+                  </View>
+                  <Ionicons name="add-circle" size={20} color={color} />
+                </TouchableOpacity>
+              )}
+            />
+          </View>
         </View>
-        <View style={{ width: 44 }} />
-      </View>
+      </Modal>
 
-      {/* Main Content Area */}
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {step === 0 && renderStep0()}
-        {step === 1 && renderStep1()}
-        {step === 2 && renderStep2()}
-        {step === 3 && renderStep3()}
-      </ScrollView>
-
-      {/* Navigation Footer */}
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 20, borderTopColor: colors.border }]}>
-        <TouchableOpacity 
-          onPress={() => setStep(Math.max(0, step - 1))} 
-          style={[styles.navBtn, { opacity: step === 0 ? 0 : 1 }]}
-          disabled={step === 0}
-        >
-          <Text style={[styles.navBtnText, { color: colors.textSecondary }]}>BACK</Text>
-        </TouchableOpacity>
-
-        {step < 3 ? (
-          <TouchableOpacity 
-            onPress={() => {
-              if (step === 0 && !title.trim()) { Alert.alert('Required', 'Please enter a title.'); return; }
-              setStep(step + 1); 
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            }} 
-            style={[styles.navBtnPrimary, { backgroundColor: color }]}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.navBtnPrimaryText}>NEXT STEP</Text>
-            <Ionicons name="arrow-forward" size={16} color="#fff" />
+      <ScrollView
+        contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: 100, paddingHorizontal: 16 }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
+          <Text style={[styles.title, { color: colors.text }]}>
+            {isEdit ? 'Edit Custom Split' : 'Create Custom Split'}
+          </Text>
+        </View>
+
+        {step === 1 ? (
+          <View style={{ gap: 20 }}>
+            {/* Step Indicators */}
+            <View style={{ flexDirection: 'row', gap: 6, marginVertical: 10 }}>
+              <View style={[styles.stepBar, { backgroundColor: color }]} />
+              <View style={[styles.stepBar, { backgroundColor: colors.border }]} />
+            </View>
+
+            {/* Program Icon preview */}
+            <View style={{ alignSelf: 'center', marginVertical: 10 }}>
+              <View style={[styles.previewIconWrap, { backgroundColor: `${color}15`, borderColor: color }]}>
+                <Text style={{ fontSize: 44 }}>{emoji}</Text>
+              </View>
+            </View>
+
+            {/* Inputs */}
+            <View style={styles.inputWrap}>
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>SPLIT PLAN NAME</Text>
+              <TextInput
+                value={title}
+                onChangeText={setTitle}
+                placeholder="e.g. Hypertrophy PPL, Arnold Split"
+                placeholderTextColor={colors.textMuted}
+                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+              />
+            </View>
+
+            <View style={styles.inputWrap}>
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>SHORT DESCRIPTION (OPTIONAL)</Text>
+              <TextInput
+                value={description}
+                onChangeText={setDescription}
+                placeholder="e.g. 3-day split focused on chest, back, legs hypertrophy."
+                placeholderTextColor={colors.textMuted}
+                multiline
+                numberOfLines={3}
+                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface, height: 80, paddingTop: 12 }]}
+              />
+            </View>
+
+            {/* Emojis selection */}
+            <View style={styles.selectorWrap}>
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>CHOOSE EMOJI</Text>
+              <View style={styles.gridRow}>
+                {EMOJI_OPTIONS.map(em => (
+                  <TouchableOpacity
+                    key={em}
+                    onPress={() => { setEmoji(em); Haptics.selectionAsync(); }}
+                    style={[styles.emojiBtn, emoji === em && { borderColor: color, backgroundColor: `${color}15` }]}
+                  >
+                    <Text style={{ fontSize: 22 }}>{em}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Color selection */}
+            <View style={styles.selectorWrap}>
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>CHOOSE ACCENT COLOR</Text>
+              <View style={styles.gridRow}>
+                {COLOR_OPTIONS.map(c => (
+                  <TouchableOpacity
+                    key={c}
+                    onPress={() => { setColor(c); Haptics.selectionAsync(); }}
+                    style={[styles.colorBtn, { backgroundColor: c }, color === c && { borderWidth: 3, borderColor: '#fff' }]}
+                  />
+                ))}
+              </View>
+            </View>
+
+            <TouchableOpacity
+              onPress={() => setStep(2)}
+              style={[styles.primaryBtn, { backgroundColor: color }]}
+            >
+              <Text style={{ color: '#fff', fontFamily: 'Inter_700Bold' }}>Next: Configure Split Days →</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
-          <View style={{ flex: 1 }} />
+          <View style={{ gap: 20 }}>
+            {/* Step Indicators */}
+            <View style={{ flexDirection: 'row', gap: 6, marginVertical: 10 }}>
+              <View style={[styles.stepBar, { backgroundColor: color }]} />
+              <View style={[styles.stepBar, { backgroundColor: color }]} />
+            </View>
+
+            <Text style={{ fontSize: 13, color: colors.textSecondary }}>
+              Define the routines in your split and add target exercises.
+            </Text>
+
+            {days.map((day, dIdx) => (
+              <View key={dIdx} style={[styles.dayBlock, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <View style={[styles.dayBlockHeader, { borderBottomColor: colors.border }]}>
+                  <View style={{ flex: 1 }}>
+                    <TextInput
+                      value={day.title}
+                      onChangeText={val => updateDayField(dIdx, 'title', val)}
+                      style={[styles.dayTitleInput, { color: colors.text }]}
+                      placeholder="Day Name (e.g. Day 1: Push)"
+                    />
+                  </View>
+                  <TouchableOpacity onPress={() => removeDay(dIdx)} style={styles.deleteDayBtn}>
+                    <Ionicons name="trash-outline" size={18} color="#FF5E5E" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Muscle target groups */}
+                <View style={{ padding: 12, gap: 8 }}>
+                  <Text style={[styles.blockLabel, { color: colors.textMuted }]}>TARGET MUSCLES</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                    {MUSCLE_GROUPS.map(g => {
+                      const selected = day.targetMuscleGroups.includes(g);
+                      return (
+                        <TouchableOpacity
+                          key={g}
+                          onPress={() => toggleMuscleGroup(dIdx, g)}
+                          style={[
+                            styles.musclePill,
+                            { borderColor: colors.border, backgroundColor: selected ? color : 'transparent' }
+                          ]}
+                        >
+                          <Text style={{ fontSize: 11, fontFamily: 'Inter_600SemiBold', color: selected ? '#fff' : colors.textSecondary }}>
+                            {g}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+
+                {/* Exercises list in day */}
+                <View style={{ paddingHorizontal: 12, paddingBottom: 12, gap: 10 }}>
+                  <Text style={[styles.blockLabel, { color: colors.textMuted }]}>EXERCISES ({day.exercises.length})</Text>
+
+                  {day.exercises.map((ex, eIdx) => (
+                    <View key={ex.exerciseId} style={[styles.exRow, { backgroundColor: colors.surfaceMid, borderColor: colors.border }]}>
+                      <View style={{ flex: 1, gap: 6 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 13, fontFamily: 'Inter_700Bold', color: colors.text }} numberOfLines={1}>
+                            {ex.name}
+                          </Text>
+                          <TouchableOpacity onPress={() => removeExerciseFromDay(dIdx, ex.exerciseId)}>
+                            <Ionicons name="close" size={16} color={colors.textSecondary} />
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* Numeric Targets */}
+                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.targetLabel}>SETS</Text>
+                            <TextInput
+                              value={String(ex.targetSets)}
+                              onChangeText={v => updateExerciseTarget(dIdx, ex.exerciseId, 'targetSets', parseInt(v) || 0)}
+                              keyboardType="numeric"
+                              style={[styles.numericInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+                            />
+                          </View>
+
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.targetLabel}>REPS</Text>
+                            <TextInput
+                              value={String(ex.targetReps)}
+                              onChangeText={v => updateExerciseTarget(dIdx, ex.exerciseId, 'targetReps', parseInt(v) || 0)}
+                              keyboardType="numeric"
+                              style={[styles.numericInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+                            />
+                          </View>
+
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.targetLabel}>RPE (1-10)</Text>
+                            <TextInput
+                              value={String(ex.targetRpe)}
+                              onChangeText={v => updateExerciseTarget(dIdx, ex.exerciseId, 'targetRpe', parseInt(v) || 0)}
+                              keyboardType="numeric"
+                              style={[styles.numericInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+
+                  <TouchableOpacity
+                    onPress={() => openAddExercise(dIdx)}
+                    style={[styles.addExBtn, { borderColor: color }]}
+                  >
+                    <Ionicons name="add" size={16} color={color} />
+                    <Text style={{ fontSize: 12, fontFamily: 'Inter_700Bold', color }}>Add Exercise</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+
+            <TouchableOpacity onPress={addDay} style={[styles.addDayBtn, { borderColor: colors.border }]} activeOpacity={0.7}>
+              <Ionicons name="add-circle-outline" size={20} color={color} />
+              <Text style={{ color: colors.text, fontFamily: 'Inter_700Bold' }}>Add Routine Split Day</Text>
+            </TouchableOpacity>
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+              <TouchableOpacity
+                onPress={() => setStep(1)}
+                style={[styles.secondaryBtn, { flex: 1, borderColor: colors.border }]}
+              >
+                <Text style={{ color: colors.text, fontFamily: 'Inter_700Bold' }}>← Back</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleSave}
+                style={[styles.primaryBtn, { flex: 2, backgroundColor: color }]}
+              >
+                <Text style={{ color: '#fff', fontFamily: 'Inter_700Bold' }}>Save Split Plan</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 16 },
-  backBtn: { width: 44, height: 44, justifyContent: 'center' },
-  stepDots: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  dot: { height: 8, borderRadius: 4 },
-  
-  scrollContent: { flexGrow: 1 },
-  stepContainer: { flex: 1, paddingHorizontal: 24, paddingTop: 20 },
-  stepTitle: { fontSize: 38, fontFamily: 'Inter_700Bold', letterSpacing: -1 },
-  stepSub: { fontSize: 16, fontFamily: 'Inter_400Regular', marginTop: 8, marginBottom: 32 },
+  container: { flex: 1 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 },
+  backBtn: { padding: 4 },
+  title: { fontSize: 20, fontFamily: 'Inter_700Bold', letterSpacing: -0.5 },
+  stepBar: { flex: 1, height: 4, borderRadius: 2 },
 
-  // Swiss Inputs
-  inputWrap: { marginBottom: 24 },
-  inputLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.5, marginBottom: 8, textTransform: 'uppercase' },
-  inputContainer: { borderRadius: 16, borderWidth: 1.5, overflow: 'hidden' },
-  swissInput: { padding: 16, fontSize: 16, fontFamily: 'Inter_500Medium' },
-  helperText: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: -16, marginBottom: 24 },
+  previewIconWrap: { width: 90, height: 90, borderRadius: 28, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
 
-  imagePickerBtn: { height: 120, borderRadius: 16, borderWidth: 1.5, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  imagePickerPreview: { width: '100%', height: '100%' },
+  inputWrap: { gap: 6 },
+  inputLabel: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
+  input: { height: 48, borderRadius: 12, borderWidth: 1, paddingHorizontal: 16, fontSize: 14, fontFamily: 'Inter_500Medium' },
 
-  // Emoji Grid
-  emojiGrid: { flexDirection: 'row', gap: 12, paddingHorizontal: 24 },
-  emojiCell: { width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  selectorWrap: { gap: 8 },
+  gridRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  emojiBtn: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.03)' },
+  colorBtn: { width: 32, height: 32, borderRadius: 16 },
 
-  // Color Grid
-  colorGrid: { flexDirection: 'row', gap: 16, paddingHorizontal: 24 },
-  colorCell: { width: 48, height: 48, borderRadius: 24 },
+  primaryBtn: { height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  secondaryBtn: { height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
 
-  // Duration
-  durationRow: { flexDirection: 'row', alignItems: 'center', gap: 20, marginBottom: 40 },
-  durBtn: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
-  durDisplay: { flex: 1, alignItems: 'center' },
-  durText: { fontSize: 42, fontFamily: 'Inter_700Bold' },
+  // Step 2 Days Styles
+  dayBlock: { borderRadius: 18, borderWidth: 1, overflow: 'hidden' },
+  dayBlockHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1 },
+  dayTitleInput: { fontSize: 15, fontFamily: 'Inter_700Bold', padding: 0 },
+  deleteDayBtn: { padding: 4 },
+  blockLabel: { fontSize: 8, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
 
-  // Blueprint Card
-  bpCard: { borderRadius: 20, borderWidth: 1, overflow: 'hidden' },
-  bpHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
-  bpBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
-  bpBadgeText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
-  bpTitle: { fontSize: 16, fontFamily: 'Inter_700Bold', letterSpacing: -0.2 },
-  bpSub: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 2 },
-  bpContent: { padding: 16, paddingTop: 4, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.05)' },
-  
-  bpTasksWrap: { marginTop: 10 },
-  bpTask: { borderRadius: 12, borderWidth: 1, padding: 12, marginBottom: 12 },
-  bpTaskHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  taskTypeBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  taskTypeText: { fontSize: 10, fontFamily: 'Inter_700Bold', textTransform: 'uppercase' },
-  taskTitleInput: { fontSize: 15, fontFamily: 'Inter_500Medium', padding: 0 },
-  addTaskBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed' },
-  addTaskText: { fontSize: 13, fontFamily: 'Inter_700Bold' },
+  musclePill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 100, borderWidth: 1 },
 
-  // Flight Path Review
-  flightPathCard: { padding: 32, borderRadius: 24, borderWidth: 1, alignItems: 'center', marginBottom: 40 },
-  fpTitle: { fontSize: 24, fontFamily: 'Inter_700Bold', textAlign: 'center', marginBottom: 8 },
-  fpIdentity: { fontSize: 15, fontFamily: 'Inter_400Regular', textAlign: 'center', fontStyle: 'italic', marginBottom: 24 },
-  fpStatsRow: { flexDirection: 'row', gap: 24, marginBottom: 24 },
-  fpStat: { alignItems: 'center' },
-  fpStatVal: { fontSize: 28, fontFamily: 'Inter_700Bold' },
-  fpStatLabel: { fontSize: 11, fontFamily: 'Inter_600SemiBold', textTransform: 'uppercase', marginTop: 4 },
-  stakesBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12 },
-  stakesText: { fontSize: 12, fontFamily: 'Inter_600SemiBold', flexShrink: 1 },
+  exRow: { padding: 12, borderRadius: 14, borderWidth: 1 },
+  targetLabel: { fontSize: 8, fontFamily: 'Inter_700Bold', color: '#888', marginBottom: 4 },
+  numericInput: { height: 36, borderRadius: 8, borderWidth: 1, textAlign: 'center', fontSize: 13, fontFamily: 'Inter_700Bold', padding: 0 },
 
-  initBtnWrap: { borderRadius: 20, overflow: 'hidden' },
-  initBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingVertical: 20 },
-  initBtnText: { color: '#fff', fontSize: 16, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
+  addExBtn: { height: 40, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 4 },
+  addDayBtn: { height: 48, borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
 
-  // Footer
-  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 16, borderTopWidth: 1 },
-  navBtn: { paddingVertical: 12 },
-  navBtnText: { fontSize: 12, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
-  navBtnPrimary: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 100 },
-  navBtnPrimaryText: { color: '#fff', fontSize: 12, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
+  // Exercise Picker Modal
+  modalOverlay: { flex: 1, justifyContent: 'flex-end' },
+  modalContent: { height: '80%', borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, padding: 16, gap: 14 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  modalTitle: { fontSize: 18, fontFamily: 'Inter_700Bold' },
+  searchBarContainer: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 42, borderRadius: 10, borderWidth: 1, paddingHorizontal: 12 },
+  searchInput: { flex: 1, fontSize: 13 },
+  exerciseItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1 },
+  exerciseItemName: { fontSize: 14, fontFamily: 'Inter_700Bold' }
 });
