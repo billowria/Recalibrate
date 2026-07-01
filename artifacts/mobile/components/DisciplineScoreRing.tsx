@@ -24,13 +24,12 @@ function getScoreColor(score: number): string {
 }
 
 function getScoreLabel(score: number): string {
-  if (score >= 90) return 'Exceptional';
-  if (score >= 80) return 'Strong';
-  if (score >= 70) return 'Good';
-  if (score >= 60) return 'Building';
+  if (score >= 90) return 'Elite Athlete';
+  if (score >= 80) return 'Consistent';
+  if (score >= 60) return 'Active';
   if (score >= 40) return 'Starting';
   if (score >= 20) return 'Warming Up';
-  return 'Day Zero';
+  return 'Resting';
 }
 
 export function DisciplineScoreRing({
@@ -205,10 +204,6 @@ export function DisciplineScoreRing({
               cy={leadingDot.y}
               r={4}
               fill="url(#orangeGlow)"
-              shadowColor="#FFB03A"
-              shadowOffset={{ width: 0, height: 0 }}
-              shadowOpacity={0.8}
-              shadowRadius={6}
             />
           )}
         </Svg>
@@ -226,7 +221,7 @@ export function DisciplineScoreRing({
         )}
         {showContext && (
           <Text style={[styles.contextText, { color: colors.isDark ? '#606080' : colors.textSecondary }]}>
-            {contextText || 'Discipline Rating'}
+            {contextText || 'Fitness Completion'}
           </Text>
         )}
       </View>

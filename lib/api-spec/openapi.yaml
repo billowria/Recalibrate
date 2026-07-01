@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Api
   version: 0.1.0
-  description: API specification
+  description: FitBuddy API specification
 servers:
   - url: /api
     description: Base API path
@@ -31,7 +31,7 @@ paths:
       operationId: registerUser
       tags: [users]
       summary: Register user
-      description: Registers a new user device and seeds default metrics.
+      description: Registers a new user device.
       requestBody:
         required: true
         content:
@@ -51,7 +51,7 @@ paths:
       operationId: loginUser
       tags: [users]
       summary: Login user
-      description: Authenticates a user and returns their profile and session userId.
+      description: Authenticates a user and returns their profile.
       requestBody:
         required: true
         content:
@@ -121,7 +121,7 @@ paths:
       operationId: updatePushToken
       tags: [users]
       summary: Update Expo Push Token
-      description: Stores the device's push token to enable remote push notifications.
+      description: Stores the device's push token.
       parameters:
         - name: userId
           in: path
@@ -221,14 +221,9 @@ components:
           format: uuid
         profile:
           $ref: "#/components/schemas/UserProfileSync"
-        metrics:
-          type: array
-          items:
-            $ref: "#/components/schemas/MetricSync"
       required:
         - userId
         - profile
-        - metrics
 
     UserProfileSync:
       type: object
@@ -266,261 +261,265 @@ components:
         - activeProgramIds
         - savedProgramIds
 
-    MetricSync:
+    ExerciseSync:
       type: object
       properties:
         id:
           type: string
           format: uuid
+        userId:
+          type: string
+          format: uuid
+          nullable: true
         name:
           type: string
-        category:
+        muscleGroup:
           type: string
-        inputType:
-          type: string
-        scoreWeight:
-          type: integer
-        isCustom:
-          type: boolean
-        implementationIntention:
+        equipment:
           type: string
           nullable: true
       required:
         - id
         - name
-        - category
-        - inputType
-        - scoreWeight
+        - muscleGroup
 
-    DailyLogSync:
+    ProgramSync:
       type: object
       properties:
         id:
           type: string
-          format: uuid
-        metricId:
+        userId:
           type: string
           format: uuid
-        date:
+          nullable: true
+        title:
           type: string
-        value:
-          type: number
-        note:
+        description:
           type: string
           nullable: true
+        isTemplate:
+          type: boolean
+        color:
+          type: string
+        emoji:
+          type: string
       required:
         - id
-        - metricId
-        - date
-        - value
+        - title
+        - isTemplate
+        - color
+        - emoji
 
-    JournalEntrySync:
+    WorkoutDaySync:
       type: object
       properties:
         id:
           type: string
           format: uuid
-        date:
+        programId:
           type: string
-        prompt:
-          type: string
-        response:
-          type: string
-        mood:
+        dayNumber:
           type: integer
-          nullable: true
-        energy:
-          type: integer
-          nullable: true
-        freeResponse:
+        title:
           type: string
-          nullable: true
-        isWeeklyReflection:
-          type: boolean
-        programContext:
-          type: object
-          nullable: true
-          properties:
-            missedTaskIds:
-              type: array
-              items:
-                type: string
-            hitTaskIds:
-              type: array
-              items:
-                type: string
-            programId:
-              type: string
-        tags:
+        targetMuscleGroups:
           type: array
           items:
             type: string
-        wordCount:
-          type: integer
       required:
         - id
-        - date
-        - prompt
-        - response
+        - programId
+        - dayNumber
+        - title
+        - targetMuscleGroups
 
-    RelapseLogSync:
+    WorkoutDayExerciseSync:
       type: object
       properties:
         id:
           type: string
           format: uuid
-        date:
-          type: string
-        metricId:
+        workoutDayId:
           type: string
           format: uuid
-        triggerCategory:
+        exerciseId:
           type: string
-        triggerReflection:
+          format: uuid
+        sortOrder:
+          type: integer
+        targetSets:
+          type: integer
+        targetReps:
+          type: integer
+        targetRpe:
+          type: integer
+          nullable: true
+      required:
+        - id
+        - workoutDayId
+        - exerciseId
+        - sortOrder
+        - targetSets
+        - targetReps
+
+    WorkoutSessionSync:
+      type: object
+      properties:
+        id:
           type: string
-        nextAction:
+          format: uuid
+        userId:
           type: string
-        compassionStatement:
+          format: uuid
+        workoutDayId:
+          type: string
+          format: uuid
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        volumeScore:
+          type: integer
+      required:
+        - id
+        - userId
+        - startedAt
+        - volumeScore
+
+    ExerciseLogSync:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        workoutSessionId:
+          type: string
+          format: uuid
+        exerciseId:
+          type: string
+          format: uuid
+        setNumber:
+          type: integer
+        weight:
+          type: number
+        reps:
+          type: integer
+        rpe:
+          type: integer
+          nullable: true
+        isPr:
+          type: boolean
+      required:
+        - id
+        - workoutSessionId
+        - exerciseId
+        - setNumber
+        - weight
+        - reps
+        - isPr
+
+    JournalSync:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        date:
+          type: string
+        content:
+          type: string
+        mood:
           type: string
           nullable: true
       required:
         - id
+        - userId
         - date
-        - metricId
-        - triggerCategory
-        - triggerReflection
-        - nextAction
-
-    ProgramProgressSync:
-      type: object
-      properties:
-        programId:
-          type: string
-        currentWeek:
-          type: integer
-        weekStartDate:
-          type: string
-        completedWeeks:
-          type: array
-          items:
-            type: integer
-        resetCount:
-          type: integer
-      required:
-        - programId
-        - currentWeek
-        - weekStartDate
-        - completedWeeks
-        - resetCount
-
-    WeekTaskProgressSync:
-      type: object
-      properties:
-        programId:
-          type: string
-        weekNumber:
-          type: integer
-        taskId:
-          type: string
-        completed:
-          type: boolean
-      required:
-        - programId
-        - weekNumber
-        - taskId
-        - completed
-
-    FocusLogSync:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        date:
-          type: string
-        minutes:
-          type: integer
-      required:
-        - id
-        - date
-        - minutes
+        - content
 
     UserDataResponse:
       type: object
       properties:
         profile:
           $ref: "#/components/schemas/UserProfileSync"
-        metrics:
+        exercises:
           type: array
           items:
-            $ref: "#/components/schemas/MetricSync"
-        dailyLogs:
+            $ref: "#/components/schemas/ExerciseSync"
+        programs:
           type: array
           items:
-            $ref: "#/components/schemas/DailyLogSync"
-        journalEntries:
+            $ref: "#/components/schemas/ProgramSync"
+        workoutDays:
           type: array
           items:
-            $ref: "#/components/schemas/JournalEntrySync"
-        relapseLogs:
+            $ref: "#/components/schemas/WorkoutDaySync"
+        workoutDayExercises:
           type: array
           items:
-            $ref: "#/components/schemas/RelapseLogSync"
-        programProgress:
+            $ref: "#/components/schemas/WorkoutDayExerciseSync"
+        workoutSessions:
           type: array
           items:
-            $ref: "#/components/schemas/ProgramProgressSync"
-        weekTaskProgress:
+            $ref: "#/components/schemas/WorkoutSessionSync"
+        exerciseLogs:
           type: array
           items:
-            $ref: "#/components/schemas/WeekTaskProgressSync"
-        focusLogs:
+            $ref: "#/components/schemas/ExerciseLogSync"
+        journals:
           type: array
           items:
-            $ref: "#/components/schemas/FocusLogSync"
+            $ref: "#/components/schemas/JournalSync"
       required:
         - profile
-        - metrics
-        - dailyLogs
-        - journalEntries
-        - relapseLogs
-        - programProgress
-        - weekTaskProgress
-        - focusLogs
+        - exercises
+        - programs
+        - workoutDays
+        - workoutDayExercises
+        - workoutSessions
+        - exerciseLogs
+        - journals
 
     SyncRequest:
       type: object
       properties:
         profile:
           $ref: "#/components/schemas/UserProfileSync"
-        metrics:
+        exercises:
           type: array
           items:
-            $ref: "#/components/schemas/MetricSync"
-        dailyLogs:
+            $ref: "#/components/schemas/ExerciseSync"
+        programs:
           type: array
           items:
-            $ref: "#/components/schemas/DailyLogSync"
-        journalEntries:
+            $ref: "#/components/schemas/ProgramSync"
+        workoutDays:
           type: array
           items:
-            $ref: "#/components/schemas/JournalEntrySync"
-        relapseLogs:
+            $ref: "#/components/schemas/WorkoutDaySync"
+        workoutDayExercises:
           type: array
           items:
-            $ref: "#/components/schemas/RelapseLogSync"
-        programProgress:
+            $ref: "#/components/schemas/WorkoutDayExerciseSync"
+        workoutSessions:
           type: array
           items:
-            $ref: "#/components/schemas/ProgramProgressSync"
-        weekTaskProgress:
+            $ref: "#/components/schemas/WorkoutSessionSync"
+        exerciseLogs:
           type: array
           items:
-            $ref: "#/components/schemas/WeekTaskProgressSync"
-        focusLogs:
+            $ref: "#/components/schemas/ExerciseLogSync"
+        journals:
           type: array
           items:
-            $ref: "#/components/schemas/FocusLogSync"
+            $ref: "#/components/schemas/JournalSync"
 
     SyncResponse:
       type: object
