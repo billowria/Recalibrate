@@ -846,7 +846,7 @@ export default function ProfileScreen() {
           <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>UNLOCKED BADGES</Text>
           <GlassCard style={styles.sectionCard}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.badgeScroll}>
-              {badges.map((bId: string) => {
+              {badges.map((bId) => {
                 const badge = BADGES.find((b) => b.id === bId);
                 if (!badge) return null;
                 return (
@@ -882,7 +882,7 @@ export default function ProfileScreen() {
           {enrolledPrograms.map((prog) => {
             const progress = getProgramProgress(prog.id);
             if (!progress) return null;
-            const pct = (progress.completedWeeks.length / (prog.totalWeeks || 4)) * 100;
+            const pct = (progress.completedWeeks.length / prog.totalWeeks) * 100;
             return (
               <GlassCard
                 key={prog.id}
@@ -894,7 +894,7 @@ export default function ProfileScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.progTitle, { color: colors.text }]}>{prog.title}</Text>
                     <Text style={[styles.progMeta, { color: colors.textSecondary }]}>
-                      Week {progress.currentWeek} of {prog.totalWeeks || 4} · {progress.completedWeeks.length} complete
+                      Week {progress.currentWeek} of {prog.totalWeeks} · {progress.completedWeeks.length} complete
                     </Text>
                   </View>
                   <Text style={[styles.progPct, { color: prog.color }]}>{Math.round(pct)}%</Text>

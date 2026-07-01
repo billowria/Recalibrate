@@ -6,7 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface SyncResponse {
-  success: boolean;
-  syncedAt: Date;
+export interface WeekTaskProgressSync {
+  programId: string;
+  weekNumber: number;
+  taskId: string;
+  completed: boolean;
 }

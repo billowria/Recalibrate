@@ -6,7 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface SyncResponse {
-  success: boolean;
-  syncedAt: Date;
+export interface DailyLogSync {
+  id: string;
+  metricId: string;
+  date: string;
+  value: number;
+  note?: string | null;
 }

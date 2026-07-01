@@ -1,16 +1,18 @@
 import { Router } from "express";
 import crypto from "crypto";
-import { eq, or, sql, inArray } from "drizzle-orm";
+import { eq, ilike, ne, or, sql, inArray, count } from "drizzle-orm";
 import {
   db,
   users,
-  exercises,
+  metrics,
+  dailyLogs,
+  journalEntries,
+  relapseLogs,
+  programProgress,
+  weekTaskProgress,
+  focusLogs,
   programs,
-  workoutDays,
-  workoutDayExercises,
-  workoutSessions,
-  exerciseLogs,
-  journals
+  friendships
 } from "@workspace/db";
 import { RegisterUserBody, SyncUserDataBody, LoginUserBody, UpdatePushTokenBody } from "@workspace/api-zod";
 import { Expo } from "expo-server-sdk";
@@ -40,9 +42,24 @@ const verifyPassword = (password: string, hash: string) => {
 
 const router = Router();
 
+// Deterministic UUIDs for default metrics
+const DEFAULT_METRIC_SEEDS = [
+  { id: "00000000-0000-4000-8000-000000000001", name: "Wake on time", category: "build", inputType: "boolean", scoreWeight: 8 },
+  { id: "00000000-0000-4000-8000-000000000002", name: "Made bed", category: "build", inputType: "boolean", scoreWeight: 5 },
+  { id: "00000000-0000-4000-8000-000000000003", name: "10 min sunlight", category: "build", inputType: "boolean", scoreWeight: 6 },
+  { id: "00000000-0000-4000-8000-000000000004", name: "Water intake", category: "build", inputType: "counter", scoreWeight: 6 },
+  { id: "00000000-0000-4000-8000-000000000005", name: "10 min mindfulness", category: "build", inputType: "boolean", scoreWeight: 7 },
+  { id: "00000000-0000-4000-8000-000000000006", name: "Slept on time", category: "build", inputType: "boolean", scoreWeight: 8 },
+  { id: "00000000-0000-4000-8000-000000000007", name: "Cigarettes", category: "reduce", inputType: "counter", scoreWeight: 10 },
+  { id: "00000000-0000-4000-8000-000000000008", name: "Alcohol", category: "reduce", inputType: "counter", scoreWeight: 10 },
+  { id: "00000000-0000-4000-8000-000000000009", name: "Porn", category: "reduce", inputType: "boolean", scoreWeight: 12 },
+  { id: "00000000-0000-4000-8000-000000000010", name: "Mood", category: "neutral", inputType: "scale", scoreWeight: 4 },
+  { id: "00000000-0000-4000-8000-000000000011", name: "Productivity", category: "neutral", inputType: "scale", scoreWeight: 4 }
+];
+
 /**
  * POST /api/users/register
- * Registers a new user and enrolls them in the default hypertrophy program.
+ * Registers a new user, seeds their default metrics and initializes recovery program.
  */
 router.post("/users/register", async (req, res, next) => {
   try {
@@ -62,7 +79,7 @@ router.post("/users/register", async (req, res, next) => {
     const hashedPassword = body.password ? hashPassword(body.password) : null;
 
     await db.transaction(async (tx) => {
-      // Create the user profile enrolled in PPL split as default
+      // 1. Create the user profile
       await tx.insert(users).values({
         id: userId,
         name: body.name,
@@ -74,12 +91,36 @@ router.post("/users/register", async (req, res, next) => {
         totalXP: 0,
         highestStreak: 0,
         onboardingComplete: false,
-        activeProgramIds: ["ppl-split-template"],
-        savedProgramIds: ["ppl-split-template"]
+        activeProgramIds: ["dopamine-detox-protocol"],
+        savedProgramIds: ["dopamine-detox-protocol"]
+      });
+
+      // 2. Seed default metrics
+      const metricsToInsert = DEFAULT_METRIC_SEEDS.map((m) => ({
+        id: crypto.randomUUID(),
+        userId,
+        name: m.name,
+        category: m.category,
+        inputType: m.inputType,
+        scoreWeight: m.scoreWeight,
+        isCustom: false
+      }));
+      await tx.insert(metrics).values(metricsToInsert);
+
+      // 3. Initialize default program progress
+      await tx.insert(programProgress).values({
+        userId,
+        programId: "dopamine-detox-protocol",
+        currentWeek: 1,
+        weekStartDate: today,
+        completedWeeks: [],
+        resetCount: 0
       });
     });
 
+    // Fetch and return the newly created state
     const [userRecord] = await db.select().from(users).where(eq(users.id, userId));
+    const userMetrics = await db.select().from(metrics).where(eq(metrics.userId, userId));
 
     res.status(201).json({
       userId,
@@ -91,9 +132,17 @@ router.post("/users/register", async (req, res, next) => {
         totalXP: userRecord.totalXP || 0,
         highestStreak: userRecord.highestStreak || 0,
         onboardingComplete: userRecord.onboardingComplete || false,
-        activeProgramIds: userRecord.activeProgramIds || [],
-        savedProgramIds: userRecord.savedProgramIds || []
-      }
+        activeProgramIds: userRecord.activeProgramIds || []
+      },
+      metrics: userMetrics.map((m) => ({
+        id: m.id,
+        name: m.name,
+        category: m.category,
+        inputType: m.inputType,
+        scoreWeight: m.scoreWeight,
+        isCustom: m.isCustom || false,
+        implementationIntention: m.implementationIntention || null
+      }))
     });
   } catch (error) {
     next(error);
@@ -156,41 +205,23 @@ router.get("/users/:userId/data", async (req, res, next) => {
       return;
     }
 
-    // 1. Fetch exercises (both global templates and user's custom ones)
-    const dbExercises = await db.select().from(exercises).where(
-      or(eq(exercises.userId, userId), sql`user_id IS NULL`)
-    );
-
-    // 2. Fetch programs (both templates and user's custom ones)
-    const dbPrograms = await db.select().from(programs).where(
-      or(eq(programs.userId, userId), eq(programs.isTemplate, true))
-    );
-
-    const programIds = dbPrograms.map(p => p.id);
-
-    // 3. Fetch workoutDays for these programs
-    const dbWorkoutDays = programIds.length > 0
-      ? await db.select().from(workoutDays).where(inArray(workoutDays.programId, programIds))
-      : [];
-
-    const dayIds = dbWorkoutDays.map(d => d.id);
-
-    // 4. Fetch workoutDayExercises for these days
-    const dbWorkoutDayExercises = dayIds.length > 0
-      ? await db.select().from(workoutDayExercises).where(inArray(workoutDayExercises.workoutDayId, dayIds))
-      : [];
-
-    // 5. Fetch workoutSessions for this user
-    const dbWorkoutSessions = await db.select().from(workoutSessions).where(eq(workoutSessions.userId, userId));
-    const sessionIds = dbWorkoutSessions.map(s => s.id);
-
-    // 6. Fetch exerciseLogs for these sessions
-    const dbExerciseLogs = sessionIds.length > 0
-      ? await db.select().from(exerciseLogs).where(inArray(exerciseLogs.workoutSessionId, sessionIds))
-      : [];
-
-    // 7. Fetch journals for this user
-    const dbJournals = await db.select().from(journals).where(eq(journals.userId, userId));
+    const [
+      dbMetrics,
+      dbDailyLogs,
+      dbJournalEntries,
+      dbRelapseLogs,
+      dbProgramProgress,
+      dbWeekTaskProgress,
+      dbFocusLogs
+    ] = await Promise.all([
+      db.select().from(metrics).where(eq(metrics.userId, userId)),
+      db.select().from(dailyLogs).where(eq(dailyLogs.userId, userId)),
+      db.select().from(journalEntries).where(eq(journalEntries.userId, userId)),
+      db.select().from(relapseLogs).where(eq(relapseLogs.userId, userId)),
+      db.select().from(programProgress).where(eq(programProgress.userId, userId)),
+      db.select().from(weekTaskProgress).where(eq(weekTaskProgress.userId, userId)),
+      db.select().from(focusLogs).where(eq(focusLogs.userId, userId))
+    ]);
 
     res.json({
       profile: {
@@ -206,62 +237,61 @@ router.get("/users/:userId/data", async (req, res, next) => {
         avatarUrl: profileRecord.avatarUrl || null,
         bio: profileRecord.bio || null,
       },
-      exercises: dbExercises.map((e) => ({
-        id: e.id,
-        userId: e.userId || null,
-        name: e.name,
-        muscleGroup: e.muscleGroup,
-        equipment: e.equipment || null
+      metrics: dbMetrics.map((m) => ({
+        id: m.id,
+        name: m.name,
+        category: m.category,
+        inputType: m.inputType,
+        scoreWeight: m.scoreWeight,
+        isCustom: m.isCustom || false,
+        implementationIntention: m.implementationIntention || null
       })),
-      programs: dbPrograms.map((p) => ({
-        id: p.id,
-        userId: p.userId || null,
-        title: p.title,
-        description: p.description || null,
-        isTemplate: p.isTemplate,
-        color: p.color,
-        emoji: p.emoji
+      dailyLogs: dbDailyLogs.map((l) => ({
+        id: l.id,
+        metricId: l.metricId,
+        date: l.date,
+        value: l.value,
+        note: l.note || null
       })),
-      workoutDays: dbWorkoutDays.map((wd) => ({
-        id: wd.id,
-        programId: wd.programId,
-        dayNumber: wd.dayNumber,
-        title: wd.title,
-        targetMuscleGroups: wd.targetMuscleGroups
-      })),
-      workoutDayExercises: dbWorkoutDayExercises.map((wde) => ({
-        id: wde.id,
-        workoutDayId: wde.workoutDayId,
-        exerciseId: wde.exerciseId,
-        sortOrder: wde.sortOrder,
-        targetSets: wde.targetSets,
-        targetReps: wde.targetReps,
-        targetRpe: wde.targetRpe || null
-      })),
-      workoutSessions: dbWorkoutSessions.map((ws) => ({
-        id: ws.id,
-        userId: ws.userId,
-        workoutDayId: ws.workoutDayId || null,
-        startedAt: ws.startedAt.toISOString(),
-        completedAt: ws.completedAt ? ws.completedAt.toISOString() : null,
-        volumeScore: ws.volumeScore
-      })),
-      exerciseLogs: dbExerciseLogs.map((el) => ({
-        id: el.id,
-        workoutSessionId: el.workoutSessionId,
-        exerciseId: el.exerciseId,
-        setNumber: el.setNumber,
-        weight: Number(el.weight),
-        reps: el.reps,
-        rpe: el.rpe || null,
-        isPr: el.isPr
-      })),
-      journals: dbJournals.map((j) => ({
+      journalEntries: dbJournalEntries.map((j) => ({
         id: j.id,
-        userId: j.userId,
         date: j.date,
-        content: j.content,
-        mood: j.mood || null
+        prompt: j.prompt,
+        response: j.response,
+        mood: j.mood ?? null,
+        energy: j.energy ?? null,
+        freeResponse: j.freeResponse ?? null,
+        isWeeklyReflection: j.isWeeklyReflection ?? false,
+        programContext: (j.programContext as any) ?? null,
+        tags: j.tags || [],
+        wordCount: j.wordCount || 0
+      })),
+      relapseLogs: dbRelapseLogs.map((r) => ({
+        id: r.id,
+        date: r.date,
+        metricId: r.metricId,
+        triggerCategory: r.triggerCategory,
+        triggerReflection: r.triggerReflection,
+        nextAction: r.nextAction,
+        compassionStatement: r.compassionStatement || null
+      })),
+      programProgress: dbProgramProgress.map((p) => ({
+        programId: p.programId,
+        currentWeek: p.currentWeek,
+        weekStartDate: p.weekStartDate,
+        completedWeeks: p.completedWeeks || [],
+        resetCount: p.resetCount || 0
+      })),
+      weekTaskProgress: dbWeekTaskProgress.map((wt) => ({
+        programId: wt.programId,
+        weekNumber: wt.weekNumber,
+        taskId: wt.taskId,
+        completed: wt.completed
+      })),
+      focusLogs: dbFocusLogs.map((fl) => ({
+        id: fl.id,
+        date: fl.date,
+        minutes: fl.minutes
       }))
     });
   } catch (error) {
@@ -315,156 +345,152 @@ router.post("/users/:userId/sync", async (req, res, next) => {
         });
       }
 
-      // 2. Sync custom exercises
-      if (body.exercises && body.exercises.length > 0) {
-        for (const e of body.exercises) {
-          if (!e.userId) continue; // Only sync custom user-owned exercises
-          await tx.insert(exercises).values({
-            id: e.id,
-            userId: e.userId,
-            name: e.name,
-            muscleGroup: e.muscleGroup,
-            equipment: e.equipment || null
-          }).onConflictDoUpdate({
-            target: exercises.id,
-            set: {
-              name: e.name,
-              muscleGroup: e.muscleGroup,
-              equipment: e.equipment || null
-            }
-          });
-        }
-      }
-
-      // 3. Sync custom programs
-      if (body.programs && body.programs.length > 0) {
-        for (const p of body.programs) {
-          if (!p.userId) continue; // Only sync custom user-owned programs
-          await tx.insert(programs).values({
-            id: p.id,
-            userId: p.userId,
-            title: p.title,
-            description: p.description || null,
-            isTemplate: p.isTemplate,
-            color: p.color,
-            emoji: p.emoji
-          }).onConflictDoUpdate({
-            target: programs.id,
-            set: {
-              title: p.title,
-              description: p.description || null,
-              isTemplate: p.isTemplate,
-              color: p.color,
-              emoji: p.emoji
-            }
-          });
-        }
-      }
-
-      // 4. Sync workoutDays
-      if (body.workoutDays && body.workoutDays.length > 0) {
-        for (const wd of body.workoutDays) {
-          await tx.insert(workoutDays).values({
-            id: wd.id,
-            programId: wd.programId,
-            dayNumber: wd.dayNumber,
-            title: wd.title,
-            targetMuscleGroups: wd.targetMuscleGroups
-          }).onConflictDoUpdate({
-            target: workoutDays.id,
-            set: {
-              dayNumber: wd.dayNumber,
-              title: wd.title,
-              targetMuscleGroups: wd.targetMuscleGroups
-            }
-          });
-        }
-      }
-
-      // 5. Sync workoutDayExercises
-      if (body.workoutDayExercises && body.workoutDayExercises.length > 0) {
-        for (const wde of body.workoutDayExercises) {
-          await tx.insert(workoutDayExercises).values({
-            id: wde.id,
-            workoutDayId: wde.workoutDayId,
-            exerciseId: wde.exerciseId,
-            sortOrder: wde.sortOrder,
-            targetSets: wde.targetSets,
-            targetReps: wde.targetReps,
-            targetRpe: wde.targetRpe || null
-          }).onConflictDoUpdate({
-            target: workoutDayExercises.id,
-            set: {
-              exerciseId: wde.exerciseId,
-              sortOrder: wde.sortOrder,
-              targetSets: wde.targetSets,
-              targetReps: wde.targetReps,
-              targetRpe: wde.targetRpe || null
-            }
-          });
-        }
-      }
-
-      // 6. Sync workoutSessions
-      if (body.workoutSessions && body.workoutSessions.length > 0) {
-        for (const ws of body.workoutSessions) {
-          await tx.insert(workoutSessions).values({
-            id: ws.id,
+      // 2. Sync metrics
+      if (body.metrics && body.metrics.length > 0) {
+        for (const m of body.metrics) {
+          await tx.insert(metrics).values({
+            id: m.id,
             userId,
-            workoutDayId: ws.workoutDayId || null,
-            startedAt: new Date(ws.startedAt),
-            completedAt: ws.completedAt ? new Date(ws.completedAt) : null,
-            volumeScore: ws.volumeScore
+            name: m.name,
+            category: m.category,
+            inputType: m.inputType,
+            scoreWeight: m.scoreWeight,
+            isCustom: m.isCustom || false,
+            implementationIntention: m.implementationIntention || null
           }).onConflictDoUpdate({
-            target: workoutSessions.id,
+            target: metrics.id,
             set: {
-              workoutDayId: ws.workoutDayId || null,
-              completedAt: ws.completedAt ? new Date(ws.completedAt) : null,
-              volumeScore: ws.volumeScore
+              name: m.name,
+              category: m.category,
+              inputType: m.inputType,
+              scoreWeight: m.scoreWeight,
+              isCustom: m.isCustom || false,
+              implementationIntention: m.implementationIntention || null
             }
           });
         }
       }
 
-      // 7. Sync exerciseLogs
-      if (body.exerciseLogs && body.exerciseLogs.length > 0) {
-        for (const el of body.exerciseLogs) {
-          await tx.insert(exerciseLogs).values({
-            id: el.id,
-            workoutSessionId: el.workoutSessionId,
-            exerciseId: el.exerciseId,
-            setNumber: el.setNumber,
-            weight: el.weight,
-            reps: el.reps,
-            rpe: el.rpe || null,
-            isPr: el.isPr || false
+      // 3. Sync daily logs
+      if (body.dailyLogs && body.dailyLogs.length > 0) {
+        for (const log of body.dailyLogs) {
+          await tx.insert(dailyLogs).values({
+            id: log.id,
+            userId,
+            metricId: log.metricId,
+            date: log.date,
+            value: log.value,
+            note: log.note || null
           }).onConflictDoUpdate({
-            target: exerciseLogs.id,
+            target: dailyLogs.id,
             set: {
-              weight: el.weight,
-              reps: el.reps,
-              rpe: el.rpe || null,
-              isPr: el.isPr || false
+              value: log.value,
+              note: log.note || null
             }
           });
         }
       }
 
-      // 8. Sync journals
-      if (body.journals && body.journals.length > 0) {
-        for (const j of body.journals) {
-          await tx.insert(journals).values({
+      // 4. Sync journal entries
+      if (body.journalEntries && body.journalEntries.length > 0) {
+        for (const j of body.journalEntries) {
+          await tx.insert(journalEntries).values({
             id: j.id,
             userId,
             date: j.date,
-            content: j.content,
-            mood: j.mood || null
+            prompt: j.prompt,
+            response: j.response,
+            mood: j.mood ?? null,
+            energy: j.energy ?? null,
+            freeResponse: j.freeResponse ?? null,
+            isWeeklyReflection: j.isWeeklyReflection ?? false,
+            programContext: j.programContext ?? null,
+            tags: j.tags || [],
+            wordCount: j.wordCount || 0
           }).onConflictDoUpdate({
-            target: journals.id,
+            target: journalEntries.id,
             set: {
-              content: j.content,
-              mood: j.mood || null,
-              updatedAt: new Date()
+              prompt: j.prompt,
+              response: j.response,
+              mood: j.mood ?? null,
+              energy: j.energy ?? null,
+              freeResponse: j.freeResponse ?? null,
+              isWeeklyReflection: j.isWeeklyReflection ?? false,
+              programContext: j.programContext ?? null,
+              tags: j.tags || [],
+              wordCount: j.wordCount || 0
+            }
+          });
+        }
+      }
+
+      // 5. Sync relapse logs
+      if (body.relapseLogs && body.relapseLogs.length > 0) {
+        for (const r of body.relapseLogs) {
+          await tx.insert(relapseLogs).values({
+            id: r.id,
+            userId,
+            date: r.date,
+            metricId: r.metricId,
+            triggerCategory: r.triggerCategory,
+            triggerReflection: r.triggerReflection,
+            nextAction: r.nextAction,
+            compassionStatement: r.compassionStatement || null
+          }).onConflictDoUpdate({
+            target: relapseLogs.id,
+            set: {
+              triggerCategory: r.triggerCategory,
+              triggerReflection: r.triggerReflection,
+              nextAction: r.nextAction,
+              compassionStatement: r.compassionStatement || null
+            }
+          });
+        }
+      }
+
+      // 6. Sync program progress (replace with current array since total count is tiny)
+      if (body.programProgress) {
+        await tx.delete(programProgress).where(eq(programProgress.userId, userId));
+        if (body.programProgress.length > 0) {
+          const toInsert = body.programProgress.map((p) => ({
+            userId,
+            programId: p.programId,
+            currentWeek: p.currentWeek,
+            weekStartDate: p.weekStartDate,
+            completedWeeks: p.completedWeeks,
+            resetCount: p.resetCount
+          }));
+          await tx.insert(programProgress).values(toInsert);
+        }
+      }
+
+      // 7. Sync week task progress (replace with current array since total count is tiny)
+      if (body.weekTaskProgress) {
+        await tx.delete(weekTaskProgress).where(eq(weekTaskProgress.userId, userId));
+        if (body.weekTaskProgress.length > 0) {
+          const toInsert = body.weekTaskProgress.map((wt) => ({
+            userId,
+            programId: wt.programId,
+            weekNumber: wt.weekNumber,
+            taskId: wt.taskId,
+            completed: wt.completed
+          }));
+          await tx.insert(weekTaskProgress).values(toInsert);
+        }
+      }
+
+      // 8. Sync focus logs
+      if (body.focusLogs && body.focusLogs.length > 0) {
+        for (const fl of body.focusLogs) {
+          await tx.insert(focusLogs).values({
+            id: fl.id,
+            userId,
+            date: fl.date,
+            minutes: fl.minutes
+          }).onConflictDoUpdate({
+            target: focusLogs.id,
+            set: {
+              minutes: fl.minutes
             }
           });
         }
@@ -501,7 +527,7 @@ router.post("/users/:userId/push-token", async (req, res, next) => {
 
 /**
  * POST /api/users/:userId/test-push
- * Triggers a test push notification
+ * Triggers a test push notification with custom brand copy
  */
 router.post("/users/:userId/test-push", async (req, res, next) => {
   try {
@@ -521,8 +547,8 @@ router.post("/users/:userId/test-push", async (req, res, next) => {
     const messages = [{
       to: userRecord.expoPushToken,
       sound: 'default' as const,
-      title: 'FitBuddy: Time to lift! 🏋️‍♂️',
-      body: 'Consistency builds iron focus. Let\'s crush today\'s gym session and level up your Fit Score!',
+      title: 'Recalibrate: Stay Disciplined 🐺',
+      body: 'Your habits wait for no one. Tap to log your daily wins and keep your streak alive.',
       data: { withSome: 'data' },
     }];
 
@@ -543,7 +569,7 @@ router.post("/users/:userId/test-push", async (req, res, next) => {
 
 /**
  * PATCH /api/users/:userId/profile
- * Update profile fields
+ * Update profile fields (name, bio, wakeTime, bedTime, isProfilePublic)
  */
 router.patch("/users/:userId/profile", async (req, res, next) => {
   try {
@@ -585,6 +611,7 @@ router.patch("/users/:userId/profile", async (req, res, next) => {
 /**
  * POST /api/users/:userId/avatar
  * Upload a profile photo to Supabase Storage
+ * Expects multipart/form-data or base64 JSON body { imageBase64, contentType }
  */
 router.post("/users/:userId/avatar", async (req, res, next) => {
   try {
@@ -624,6 +651,7 @@ router.post("/users/:userId/avatar", async (req, res, next) => {
 
     const publicUrl = urlData.publicUrl;
 
+    // Save to DB
     await db.update(users)
       .set({ avatarUrl: publicUrl, updatedAt: new Date() })
       .where(eq(users.id, userId));
@@ -636,7 +664,7 @@ router.post("/users/:userId/avatar", async (req, res, next) => {
 
 /**
  * GET /api/users/:userId/public-profile
- * Returns a public profile view with stats
+ * Returns a public profile view with stats, programs, badges
  */
 router.get("/users/:userId/public-profile", async (req, res, next) => {
   try {
@@ -648,28 +676,40 @@ router.get("/users/:userId/public-profile", async (req, res, next) => {
       return;
     }
 
-    const [userPrograms, daysResult, journalResult, avgScoreResult, friendCountResult] = await Promise.all([
-      db.select().from(programs).where(eq(programs.userId, userId)),
+    // Run all queries in parallel for performance
+    const [userProgramProgress, publishedPrograms, daysResult, journalResult, avgScoreResult, friendCountResult] = await Promise.all([
+      // Program progress
+      db.select().from(programProgress).where(eq(programProgress.userId, userId)),
 
-      // Count distinct workout days
+      // Published programs by this user
+      db.select().from(programs).where(eq(programs.authorId, userId)),
+
+      // Count distinct days tracked
       db.execute(
-        sql`SELECT COUNT(DISTINCT started_at::date) as days FROM workout_sessions WHERE user_id = ${userId}`
+        sql`SELECT COUNT(DISTINCT date) as days FROM daily_logs WHERE user_id = ${userId}`
       ),
 
-      // Count journals
+      // Count journal entries
       db.execute(
-        sql`SELECT COUNT(*) as count FROM journals WHERE user_id = ${userId}`
+        sql`SELECT COUNT(*) as count FROM journal_entries WHERE user_id = ${userId}`
       ),
 
-      // 7-day rolling average volume score
+      // 7-day rolling average score: avg of daily log values per day scaled to 0-100
+      // Each day's score = sum(value * score_weight) / sum(score_weight) * 100
+      // We simplify to avg of all logged values in last 7 days as a proxy
       db.execute(
-        sql`SELECT ROUND(CAST(AVG(volume_score) AS numeric), 1) as avg_score 
-        FROM workout_sessions 
-        WHERE user_id = ${userId} 
-          AND started_at >= NOW() - INTERVAL '7 days'`
+        sql`SELECT
+          ROUND(
+            CAST(AVG(dl.value / GREATEST(m.score_weight, 1) * 100) AS numeric)
+          , 1) as avg_score
+        FROM daily_logs dl
+        JOIN metrics m ON m.id = dl.metric_id
+        WHERE dl.user_id = ${userId}
+          AND dl.date >= TO_CHAR(NOW() - INTERVAL '7 days', 'YYYY-MM-DD')
+          AND m.category != 'reduce'`
       ),
 
-      // Friend count
+      // Friend count (accepted friendships)
       db.execute(
         sql`SELECT COUNT(*) as friend_count FROM friendships
         WHERE status = 'accepted'
@@ -682,8 +722,16 @@ router.get("/users/:userId/public-profile", async (req, res, next) => {
     const averageScore = Number(avgScoreResult.rows[0]?.avg_score) || 0;
     const friendCount = Number(friendCountResult.rows[0]?.friend_count) || 0;
 
+    // Compute level from XP (matches client formula: level = floor(sqrt(totalXP / 100)) + 1)
     const totalXP = userRecord.totalXP || 0;
     const level = Math.floor(Math.sqrt(totalXP / 100)) + 1;
+
+    // Count completed programs (all weeks done)
+    const completedChallenges = userProgramProgress.filter(p => {
+      const prog = publishedPrograms.find(pr => pr.id === p.programId);
+      const totalWeeks = prog?.totalWeeks || 0;
+      return totalWeeks > 0 && (p.completedWeeks || []).length >= totalWeeks;
+    }).length;
 
     res.json({
       id: userRecord.id,
@@ -700,17 +748,22 @@ router.get("/users/:userId/public-profile", async (req, res, next) => {
       daysTracked,
       journalCount,
       friendCount,
-      completedChallenges: 0,
+      completedChallenges,
       activeProgramIds: userRecord.activeProgramIds || [],
-      programProgress: [],
-      publishedPrograms: userPrograms.map(p => ({
+      programProgress: userProgramProgress.map(p => ({
+        programId: p.programId,
+        currentWeek: p.currentWeek,
+        completedWeeks: p.completedWeeks || [],
+        resetCount: p.resetCount || 0,
+      })),
+      publishedPrograms: publishedPrograms.map(p => ({
         id: p.id,
         title: p.title,
         emoji: p.emoji,
         description: p.description,
-        totalWeeks: 1,
+        totalWeeks: p.totalWeeks,
         color: p.color,
-        isPublished: true,
+        isPublished: p.isPublished,
       })),
     });
   } catch (error) {
@@ -740,6 +793,7 @@ router.get("/users/search", async (req, res, next) => {
       ilike(users.email, searchPattern)
     );
 
+    // Exclude the searching user from results
     if (excludeUserId) {
       conditions = sql`(${conditions}) AND ${users.id} != ${excludeUserId}`;
     }
