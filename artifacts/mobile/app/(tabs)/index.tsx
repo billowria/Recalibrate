@@ -205,6 +205,7 @@ function AnimatedScoreBar({ pct, color, isVisible, delayMs, triggerKey }: { pct:
   );
 }
 
+
 // ─── Score Arc Hero ───────────────────────────────────────────────────────────
 function ScoreHero({ score, completedToday, total, streak, streakColor, level, levelProgress, levelMax, totalXP, isVisible, triggerKey }: {
   score: number; completedToday: number; total: number; streak: number; streakColor: string; level: number; levelProgress: number; levelMax: number; totalXP: number; isVisible: boolean; triggerKey: number;
@@ -215,13 +216,13 @@ function ScoreHero({ score, completedToday, total, streak, streakColor, level, l
 
   return (
     <LinearGradient
-      colors={['#0F0F1A', '#070710', '#000000']}
+      colors={colors.isDark ? ['#070A1E', '#020307'] : ['#FFFFFF', '#F0F2F5']}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={[styles.heroCard, { borderColor: colors.border }]}
     >
-      {/* Dynamic Glow background */}
-      <View style={[styles.glowBack, { backgroundColor: colors.getScoreColor(score) + '12' }]} />
+      {/* Dynamic Glow background behind the ring */}
+      <View style={[styles.glowBack, { backgroundColor: colors.getScoreColor(score) + (colors.isDark ? '08' : '05') }]} />
 
       {/* Main Score Ring Component */}
       <View style={{ alignItems: 'center', marginVertical: 10 }}>
@@ -237,64 +238,70 @@ function ScoreHero({ score, completedToday, total, streak, streakColor, level, l
         />
       </View>
 
-      {/* Stat pills row */}
-      <View style={[styles.heroPillsRow, { backgroundColor: colors.surfaceMid, borderColor: colors.border }]}>
+      {/* Stat pills row (Translucent glass style) */}
+      <View style={[
+        styles.heroPillsRow, 
+        { 
+          backgroundColor: colors.isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)', 
+          borderColor: colors.isDark ? 'rgba(255, 255, 255, 0.07)' : 'rgba(0, 0, 0, 0.05)' 
+        }
+      ]}>
         {/* Level */}
         <View style={styles.heroPill}>
           <Ionicons name="layers-outline" size={16} color={colors.brand.primary} />
           <View style={{ marginLeft: 6 }}>
-            <Text style={[styles.heroPillNum, { color: colors.text }]}>LVL {level}</Text>
-            <Text style={[styles.heroPillLabel, { color: colors.textSecondary }]}>{xpPct}% to next</Text>
+            <Text style={[styles.heroPillNum, { color: colors.isDark ? '#FFFFFF' : colors.text }]}>LVL {level}</Text>
+            <Text style={[styles.heroPillLabel, { color: colors.isDark ? 'rgba(255,255,255,0.5)' : colors.textSecondary }]}>{xpPct}% to next</Text>
           </View>
         </View>
-        <View style={[styles.heroPillDivider, { backgroundColor: colors.border }]} />
+        <View style={[styles.heroPillDivider, { backgroundColor: colors.isDark ? 'rgba(255, 255, 255, 0.08)' : colors.border }]} />
         {/* XP */}
         <View style={styles.heroPill}>
           <Ionicons name="flash" size={16} color={colors.brand.warning} />
           <View style={{ marginLeft: 6 }}>
-            <Text style={[styles.heroPillNum, { color: colors.text }]}>{totalXP.toLocaleString()}</Text>
-            <Text style={[styles.heroPillLabel, { color: colors.textSecondary }]}>Total XP</Text>
+            <Text style={[styles.heroPillNum, { color: colors.isDark ? '#FFFFFF' : colors.text }]}>{totalXP.toLocaleString()}</Text>
+            <Text style={[styles.heroPillLabel, { color: colors.isDark ? 'rgba(255,255,255,0.5)' : colors.textSecondary }]}>Total XP</Text>
           </View>
         </View>
-        <View style={[styles.heroPillDivider, { backgroundColor: colors.border }]} />
+        <View style={[styles.heroPillDivider, { backgroundColor: colors.isDark ? 'rgba(255, 255, 255, 0.08)' : colors.border }]} />
         {/* Streak */}
         <View style={styles.heroPill}>
           <Text style={{ fontSize: 16 }}>🔥</Text>
           <View style={{ marginLeft: 6 }}>
             <Text style={[styles.heroPillNum, { color: streakColor }]}>{streak}</Text>
-            <Text style={[styles.heroPillLabel, { color: colors.textSecondary }]}>Day streak</Text>
+            <Text style={[styles.heroPillLabel, { color: colors.isDark ? 'rgba(255,255,255,0.5)' : colors.textSecondary }]}>Day streak</Text>
           </View>
         </View>
       </View>
 
-      {/* Level progress bar */}
+      {/* Level progress bar (Sleek and thin) */}
       <View style={{ gap: 6 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ fontSize: 10, fontFamily: 'Inter_700Bold', color: colors.textSecondary, letterSpacing: 1 }}>XP PROGRESS</Text>
-          <Text style={{ fontSize: 10, fontFamily: 'Inter_700Bold', color: colors.brand.primary }}>{levelProgress}/{levelMax}</Text>
+          <Text style={{ fontSize: 9, fontFamily: 'Inter_700Bold', color: colors.isDark ? 'rgba(255, 255, 255, 0.5)' : colors.textMuted, letterSpacing: 1 }}>XP PROGRESS</Text>
+          <Text style={{ fontSize: 10, fontFamily: 'Inter_700Bold', color: colors.isDark ? '#FFFFFF' : colors.text }}>{levelProgress}/{levelMax}</Text>
         </View>
-        <View style={[styles.xpBar, { backgroundColor: colors.surfaceHigh }]}>
-          <View style={[styles.xpBarFill, { width: `${xpPct}%` as any, backgroundColor: colors.brand.primary }]} />
+        <View style={[styles.xpBar, { height: 3, backgroundColor: colors.isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)' }]}>
+          <View style={[styles.xpBarFill, { height: 3, width: `${xpPct}%` as any, backgroundColor: colors.brand.primary }]} />
         </View>
       </View>
 
-      {/* Habits today bar */}
+      {/* Habits today bar (Sleek and thin) */}
       <View style={{ gap: 8 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={{ fontSize: 10, fontFamily: 'Inter_700Bold', color: colors.textSecondary, letterSpacing: 1 }}>HABITS COMPLETED</Text>
+          <Text style={{ fontSize: 9, fontFamily: 'Inter_700Bold', color: colors.isDark ? 'rgba(255, 255, 255, 0.5)' : colors.textMuted, letterSpacing: 1 }}>HABITS COMPLETED</Text>
           <View style={[styles.habitsCountBadge, {
-            backgroundColor: allDone ? colors.brand.success + '15' : colors.brand.primaryGlowSoft,
-            borderColor: allDone ? colors.brand.success + '40' : colors.brand.primary + '40'
+            backgroundColor: allDone ? (colors.isDark ? 'rgba(0, 214, 143, 0.1)' : 'rgba(0, 214, 143, 0.06)') : (colors.isDark ? 'rgba(91, 94, 255, 0.1)' : 'rgba(91, 94, 255, 0.06)'),
+            borderColor: allDone ? (colors.isDark ? 'rgba(0, 214, 143, 0.25)' : 'rgba(0, 214, 143, 0.15)') : (colors.isDark ? 'rgba(91, 94, 255, 0.25)' : 'rgba(91, 94, 255, 0.15)'),
           }]}>
-            <Text style={{ fontSize: 12, fontFamily: 'Inter_700Bold', color: allDone ? colors.brand.success : colors.brand.primary }}>
+            <Text style={{ fontSize: 11, fontFamily: 'Inter_700Bold', color: allDone ? colors.brand.success : colors.brand.primary }}>
               {completedToday}/{total}
             </Text>
             {allDone && <Text style={{ fontSize: 10 }}>🏆</Text>}
           </View>
         </View>
-        <View style={[styles.segBar, { backgroundColor: colors.surfaceHigh }]}>
+        <View style={[styles.segBar, { height: 3, backgroundColor: 'transparent' }]}>
           {Array.from({ length: Math.max(total, 1) }).map((_, i) => (
-            <View key={i} style={[styles.seg, { flex: 1, backgroundColor: i < completedToday ? colors.brand.success : colors.surfaceHigh }]} />
+            <View key={i} style={[styles.seg, { flex: 1, height: 3, backgroundColor: i < completedToday ? colors.brand.success : (colors.isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)') }]} />
           ))}
         </View>
       </View>
@@ -687,7 +694,7 @@ export default function DashboardScreen() {
           ]}
         >
           <LinearGradient
-            colors={todayJournal ? ['#13131A', '#0D0D14'] : ['#1A1A24', '#0F0F1A']}
+            colors={todayJournal ? [colors.brand.primary + '15', colors.brand.primary + '05'] : [colors.surfaceMid, colors.surface]}
             style={StyleSheet.absoluteFillObject}
           />
           
@@ -699,7 +706,7 @@ export default function DashboardScreen() {
                 </Text>
                 {/* Fade out bottom of text */}
                 <LinearGradient
-                  colors={['transparent', '#0D0D14']}
+                  colors={['transparent', colors.surface]}
                   style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 24 }}
                 />
               </View>
@@ -720,8 +727,8 @@ export default function DashboardScreen() {
               </Text>
               
               <View style={styles.newJournalBtn}>
-                <Ionicons name="create-outline" size={16} color="#0D0D0D" />
-                <Text style={{ fontSize: 14, fontFamily: 'Inter_700Bold', color: '#0D0D0D' }}>
+                <Ionicons name="create-outline" size={16} color={colors.brand.primary} />
+                <Text style={{ fontSize: 14, fontFamily: 'Inter_700Bold', color: colors.text }}>
                   Write entry
                 </Text>
               </View>

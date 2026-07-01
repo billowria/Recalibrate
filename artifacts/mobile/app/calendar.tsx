@@ -19,6 +19,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/context/AppContext';
 import { useColors } from '@/hooks/useColors';
 import { GlassCard } from '@/components/GlassCard';
+import AnimatedReanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+  interpolate,
+} from 'react-native-reanimated';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -75,8 +82,21 @@ export default function CalendarScreen() {
   const [viewYear, setViewYear] = useState(new Date().getFullYear());
   const [viewMonth, setViewMonth] = useState(new Date().getMonth());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [showDayModal, setShowDayModal] = useState(false);
   const [selectedFilterMetricId, setSelectedFilterMetricId] = useState<string | null>(null);
+
+  const expandVal = useSharedValue(0);
+  
+  useEffect(() => {
+    expandVal.value = withSpring(selectedDate !== null ? 1 : 0, { damping: 20, stiffness: 120 });
+  }, [selectedDate]);
+
+  const insightsStyle = useAnimatedStyle(() => ({
+    maxHeight: interpolate(expandVal.value, [0, 1], [0, 2500]),
+    opacity: expandVal.value,
+    transform: [{ translateY: interpolate(expandVal.value, [0, 1], [-20, 0]) }],
+    overflow: 'hidden',
+    marginTop: interpolate(expandVal.value, [0, 1], [0, 16]),
+  }));
 
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
 
@@ -152,6 +172,24 @@ export default function CalendarScreen() {
   };
 
   const { firstDay, daysInMonth } = getMonthDays(viewYear, viewMonth);
+
+  const calendarWeeks = useMemo(() => {
+    const w: (number | null)[][] = [];
+    let cur: (number | null)[] = [];
+    for (let i = 0; i < firstDay; i++) cur.push(null);
+    for (let d = 1; d <= daysInMonth; d++) {
+      cur.push(d);
+      if (cur.length === 7) { w.push(cur); cur = []; }
+    }
+    if (cur.length > 0) {
+      while (cur.length < 7) cur.push(null);
+      w.push(cur);
+    }
+    return w;
+  }, [firstDay, daysInMonth]);
+
+  const selectedDayNum = selectedDate ? parseInt(selectedDate.split('-')[2], 10) : null;
+  const selectedWeekIndex = selectedDayNum ? calendarWeeks.findIndex(w => w.includes(selectedDayNum)) : -1;
 
   // Score Calculations
   const getDayScore = (date: string) => {
@@ -446,85 +484,28 @@ export default function CalendarScreen() {
               ))}
             </View>
 
-            {/* Days Grid */}
+            {/* Days Grid - Wizard Animated Rows */}
             <Animated.View style={{ opacity: gridAnim, transform: [{ translateX: gridX }] }}>
               <View style={styles.daysGrid}>
-                {Array.from({ length: firstDay }).map((_, i) => (
-                  <View key={`empty-${i}`} style={styles.dayCell} />
-                ))}
-
-                {Array.from({ length: daysInMonth }).map((_, i) => {
-                  const day = i + 1;
-                  const ds = dateStr(viewYear, viewMonth, day);
-                  const isFut = ds > todayStr;
-                  const cellColor = getDayColor(ds);
-                  const isSelected = selectedDate === ds;
-                  const hasJournal = journalEntries.some((e) => e.date === ds);
-                  const hasRelapse = relapseLogs.some((r) => r.date === ds);
-                  const todayDay = ds === todayStr;
-
-                  const cellContent = (
-                    <View
-                      style={[
-                        styles.dayNumBg,
-                        todayDay && {
-                          backgroundColor: cellColor ? cellColor + '20' : colors.brand.primaryGlowSoft,
-                          borderWidth: 1.5,
-                          borderColor: cellColor ?? colors.brand.primary,
-                        },
-                        !todayDay && cellColor && { backgroundColor: cellColor + '1C' },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.dayNum,
-                          { color: colors.textSecondary },
-                          todayDay && {
-                            color: cellColor ?? colors.brand.primaryLight,
-                            fontFamily: 'Inter_700Bold',
-                          },
-                          !todayDay && cellColor && { color: cellColor, fontFamily: 'Inter_700Bold' },
-                        ]}
-                      >
-                        {day}
-                      </Text>
-                    </View>
-                  );
-
+                {calendarWeeks.map((week, wIndex) => {
                   return (
-                    <TouchableOpacity
-                      key={day}
-                      onPress={() => {
-                        if (!isFut) {
-                          setSelectedDate(ds);
-                          setShowDayModal(true);
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                        }
-                      }}
-                      style={[
-                        styles.dayCell,
-                        isSelected && [
-                          styles.dayCellSelected,
-                          { backgroundColor: colors.pressed, borderColor: colors.brand.primary + '50' },
-                        ],
-                        isFut && { opacity: 0.2 },
-                      ]}
-                      activeOpacity={isFut ? 1 : 0.7}
-                    >
-                      {todayDay ? (
-                        <Animated.View style={{ transform: [{ scale: pulseAnim }], width: '100%', alignItems: 'center' }}>
-                          {cellContent}
-                        </Animated.View>
-                      ) : (
-                        cellContent
-                      )}
-
-                      {/* Small Indicators */}
-                      <View style={styles.indicatorRow}>
-                        {hasJournal && <View style={[styles.miniDot, { backgroundColor: colors.brand.calm }]} />}
-                        {hasRelapse && <View style={[styles.miniDot, { backgroundColor: colors.brand.danger }]} />}
-                      </View>
-                    </TouchableOpacity>
+                    <WeekRow
+                      key={`week-${wIndex}`}
+                      week={week}
+                      weekIndex={wIndex}
+                      selectedWeekIndex={selectedWeekIndex}
+                      isSelectedView={selectedDate !== null}
+                      viewYear={viewYear}
+                      viewMonth={viewMonth}
+                      todayStr={todayStr}
+                      selectedDate={selectedDate}
+                      setSelectedDate={setSelectedDate}
+                      journalEntries={journalEntries}
+                      relapseLogs={relapseLogs}
+                      getDayColor={getDayColor}
+                      pulseAnim={pulseAnim}
+                      colors={colors}
+                    />
                   );
                 })}
               </View>
@@ -566,208 +547,156 @@ export default function CalendarScreen() {
             </View>
           </GlassCard>
         </Animated.View>
+
+        <AnimatedReanimated.View style={insightsStyle}>
+          <DayInsights
+            selectedDate={selectedDate}
+            todayStr={todayStr}
+            setSelectedDate={setSelectedDate}
+            selectedScore={selectedScore}
+            completedMetrics={completedMetrics}
+            totalLogged={totalLogged}
+            selectedLogs={selectedLogs}
+            metrics={metrics}
+            selectedJournal={selectedJournal}
+            selectedRelapses={selectedRelapses}
+            colors={colors}
+          />
+        </AnimatedReanimated.View>
       </ScrollView>
-
-      {/* ─── Day Detail Modal ─── */}
-      <Modal
-        visible={showDayModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowDayModal(false)}
-      >
-        <View style={[styles.modalRoot, { backgroundColor: colors.background }]}>
-          {/* Modal Header */}
-          <View style={[styles.modalHeader, { borderBottomColor: colors.border, paddingTop: 20 }]}>
-            <View>
-              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>
-                {selectedDate
-                  ? new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', {
-                      weekday: 'long',
-                      month: 'long',
-                      day: 'numeric',
-                    })
-                  : ''}
-              </Text>
-              {selectedDate === todayStr && (
-                <Text style={[styles.modalTodayBadge, { color: colors.brand.primaryLight }]}>TODAY</Text>
-              )}
-            </View>
-            <TouchableOpacity
-              onPress={() => setShowDayModal(false)}
-              style={[styles.modalCloseBtn, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="close" size={20} color={colors.text} />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView
-            contentContainerStyle={styles.modalContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {/* Score Banner */}
-            {selectedScore !== null && (
-              <LinearGradient
-                colors={colors.getScoreGradient(selectedScore) as [string, string, ...string[]]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.modalScoreBanner}
-              >
-                <View style={styles.modalScoreLeft}>
-                  <Text style={styles.modalScoreVal}>{selectedScore}%</Text>
-                  <Text style={styles.modalScoreLabel}>Discipline Score</Text>
-                </View>
-                <Ionicons name="shield-checkmark-outline" size={32} color="#FFF" style={{ opacity: 0.8 }} />
-              </LinearGradient>
-            )}
-
-            {/* Habit Check-ins */}
-            {totalLogged > 0 ? (
-              <View style={styles.modalSection}>
-                <Text style={[styles.modalSectionTitle, { color: colors.textSecondary }]}>
-                  HABITS CHECKED ({completedMetrics.length} / {totalLogged})
-                </Text>
-                
-                <View style={[styles.modalProgressBarBg, { backgroundColor: colors.border }]}>
-                  <View
-                    style={[
-                      styles.modalProgressBarFill,
-                      {
-                        width: `${(completedMetrics.length / totalLogged) * 100}%` as any,
-                        backgroundColor:
-                          selectedScore !== null ? colors.getScoreColor(selectedScore) : colors.brand.primary,
-                      },
-                    ]}
-                  />
-                </View>
-
-                {selectedLogs.map((log) => {
-                  const metric = metrics.find((m) => m.id === log.metricId);
-                  if (!metric) return null;
-                  const isGood =
-                    metric.category === 'build' ? log.value > 0 : metric.category === 'reduce' ? log.value === 0 : true;
-                  return (
-                    <View key={log.id} style={[styles.modalLogRow, { borderBottomColor: colors.border }]}>
-                      <Ionicons
-                        name={isGood ? 'checkmark-circle' : 'close-circle'}
-                        size={20}
-                        color={isGood ? colors.brand.success : colors.brand.danger}
-                      />
-                      <Text style={[styles.modalLogMetricName, { color: colors.text }]}>
-                        {metric.emoji ?? '📊'} {metric.name}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.modalLogValue,
-                          { color: isGood ? colors.brand.success : colors.textSecondary },
-                        ]}
-                      >
-                        {metric.inputType === 'boolean'
-                          ? log.value
-                            ? 'Completed'
-                            : 'Skipped'
-                          : `${log.value} ${metric.unitLabel ?? ''}`}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-            ) : (
-              <View style={[styles.modalEmptyCard, { backgroundColor: colors.surfaceMid, borderColor: colors.border }]}>
-                <Ionicons name="calendar-outline" size={24} color={colors.textMuted} />
-                <Text style={[styles.modalEmptyText, { color: colors.textSecondary }]}>
-                  No habits logged for this day
-                </Text>
-              </View>
-            )}
-
-            {/* Daily Journal Reflection */}
-            {selectedJournal && (
-              <View style={styles.modalSection}>
-                <Text style={[styles.modalSectionTitle, { color: colors.textSecondary }]}>DAILY REFLECTION</Text>
-                <View
-                  style={[
-                    styles.modalJournalBlock,
-                    {
-                      backgroundColor: colors.surfaceMid,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                >
-                  <View style={styles.modalJournalHeader}>
-                    <View style={styles.modalTagsRow}>
-                      {(selectedJournal.tags ?? []).slice(0, 3).map((tag: string) => (
-                        <View
-                          key={tag}
-                          style={[styles.modalJournalTag, { backgroundColor: colors.brand.primaryGlowSoft }]}
-                        >
-                          <Text style={[styles.modalJournalTagText, { color: colors.brand.primaryLight }]}>
-                            {tag}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                    {(selectedJournal.wordCount ?? 0) > 0 && (
-                      <Text style={[styles.modalJournalWords, { color: colors.textMuted }]}>
-                        ✍️ {selectedJournal.wordCount} words
-                      </Text>
-                    )}
-                  </View>
-                  
-                  <Text style={[styles.modalJournalPrompt, { color: colors.brand.primaryLight }]}>
-                    "{selectedJournal.prompt}"
-                  </Text>
-                  <Text style={[styles.modalJournalResponse, { color: colors.text }]}>
-                    {selectedJournal.response}
-                  </Text>
-                  
-                  {selectedJournal.freeResponse ? (
-                    <>
-                      <View style={[styles.modalDivider, { backgroundColor: colors.border }]} />
-                      <Text style={[styles.modalJournalSectionSub, { color: colors.textSecondary }]}>
-                        Free Reflection
-                      </Text>
-                      <Text style={[styles.modalJournalResponse, { color: colors.text }]}>
-                        {selectedJournal.freeResponse}
-                      </Text>
-                    </>
-                  ) : null}
-                </View>
-              </View>
-            )}
-
-            {/* Lapses & Relapses */}
-            {selectedRelapses.length > 0 && (
-              <View style={styles.modalSection}>
-                <Text style={[styles.modalSectionTitle, { color: colors.brand.danger }]}>LAPSES & SETBACKS</Text>
-                {selectedRelapses.map((r) => (
-                  <View
-                    key={r.id}
-                    style={[
-                      styles.modalRelapseCard,
-                      {
-                        backgroundColor: colors.brand.danger + '08',
-                        borderColor: colors.brand.danger + '20',
-                      },
-                    ]}
-                  >
-                    <View style={styles.modalRelapseHeader}>
-                      <Ionicons name="alert-circle" size={16} color={colors.brand.danger} />
-                      <Text style={[styles.modalRelapseName, { color: colors.text }]}>{r.metricName}</Text>
-                    </View>
-                    <Text style={[styles.modalRelapseText, { color: colors.textSecondary }]}>
-                      {r.triggerReflection}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </ScrollView>
-        </View>
-      </Modal>
     </View>
   );
 }
+
+// ─── Swiss Day Insights Component ───────────────────────────────────────────
+function DayInsights({
+  selectedDate,
+  todayStr,
+  setSelectedDate,
+  selectedScore,
+  completedMetrics,
+  totalLogged,
+  selectedLogs,
+  metrics,
+  selectedJournal,
+  selectedRelapses,
+  colors
+}: any) {
+  if (!selectedDate) return null;
+
+  return (
+    <View style={insStyles.container}>
+      <View style={insStyles.header}>
+        <View>
+          <Text style={[insStyles.dateTitle, { color: colors.text }]}>
+            {new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', {
+              weekday: 'long',
+              month: 'long',
+              day: 'numeric',
+            })}
+          </Text>
+          {selectedDate === todayStr && (
+            <Text style={[insStyles.todayBadge, { color: colors.brand.primaryLight }]}>TODAY</Text>
+          )}
+        </View>
+        <TouchableOpacity
+          onPress={() => setSelectedDate(null)}
+          style={[insStyles.closeBtn, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}
+        >
+          <Ionicons name="close" size={20} color={colors.text} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Score */}
+      {selectedScore !== null && (
+        <View style={insStyles.scoreContainer}>
+          <Text style={[insStyles.scoreVal, { color: colors.getScoreColor(selectedScore) }]}>{selectedScore}%</Text>
+          <Text style={[insStyles.scoreLabel, { color: colors.textSecondary }]}>DISCIPLINE SCORE</Text>
+        </View>
+      )}
+
+      {/* Habits */}
+      {totalLogged > 0 ? (
+        <View style={insStyles.section}>
+          <Text style={[insStyles.sectionTitle, { color: colors.textMuted }]}>
+            HABITS ({completedMetrics.length}/{totalLogged})
+          </Text>
+          <View style={insStyles.habitList}>
+            {selectedLogs.map((log: any) => {
+              const metric = metrics.find((m: any) => m.id === log.metricId);
+              if (!metric) return null;
+              const isGood = metric.category === 'build' ? log.value > 0 : metric.category === 'reduce' ? log.value === 0 : true;
+              return (
+                <View key={log.id} style={[insStyles.habitRow, { borderBottomColor: colors.border }]}>
+                  <Text style={[insStyles.habitName, { color: colors.text }]}>{metric.emoji ?? '•'} {metric.name}</Text>
+                  <View style={[insStyles.habitStatus, { backgroundColor: isGood ? colors.brand.success + '20' : colors.brand.danger + '20' }]}>
+                    <Text style={[insStyles.habitStatusText, { color: isGood ? colors.brand.success : colors.brand.danger }]}>
+                      {metric.inputType === 'boolean' ? (log.value ? 'DONE' : 'SKIP') : log.value}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      ) : (
+        <View style={[insStyles.emptyCard, { borderColor: colors.border }]}>
+          <Text style={[insStyles.emptyText, { color: colors.textSecondary }]}>No habits logged.</Text>
+        </View>
+      )}
+
+      {/* Journal */}
+      {selectedJournal && (
+        <View style={insStyles.section}>
+          <Text style={[insStyles.sectionTitle, { color: colors.textMuted }]}>JOURNAL</Text>
+          <View style={[insStyles.journalBlock, { borderLeftColor: colors.brand.calm }]}>
+            <Text style={[insStyles.journalPrompt, { color: colors.textMuted }]}>{selectedJournal.prompt}</Text>
+            <Text style={[insStyles.journalResponse, { color: colors.text }]}>{selectedJournal.response}</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Relapses */}
+      {selectedRelapses.length > 0 && (
+        <View style={insStyles.section}>
+          <Text style={[insStyles.sectionTitle, { color: colors.brand.danger }]}>SETBACKS</Text>
+          {selectedRelapses.map((r: any) => (
+            <View key={r.id} style={[insStyles.relapseCard, { backgroundColor: colors.brand.danger + '10' }]}>
+              <Text style={[insStyles.relapseName, { color: colors.brand.danger }]}>{r.metricName}</Text>
+              <Text style={[insStyles.relapseText, { color: colors.text }]}>{r.triggerReflection}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+const insStyles = StyleSheet.create({
+  container: { marginTop: 8, paddingHorizontal: 4, paddingBottom: 60 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 },
+  dateTitle: { fontSize: 24, fontFamily: 'Inter_700Bold', letterSpacing: -0.5 },
+  todayBadge: { fontSize: 11, fontFamily: 'Inter_700Bold', letterSpacing: 1.5, marginTop: 4 },
+  closeBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  scoreContainer: { alignItems: 'flex-start', marginBottom: 32 },
+  scoreVal: { fontSize: 64, fontFamily: 'Inter_700Bold', letterSpacing: -2, lineHeight: 70 },
+  scoreLabel: { fontSize: 11, fontFamily: 'Inter_700Bold', letterSpacing: 2 },
+  section: { marginBottom: 32 },
+  sectionTitle: { fontSize: 11, fontFamily: 'Inter_700Bold', letterSpacing: 2, marginBottom: 16 },
+  habitList: { gap: 0 },
+  habitRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  habitName: { fontSize: 15, fontFamily: 'Inter_500Medium' },
+  habitStatus: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  habitStatusText: { fontSize: 11, fontFamily: 'Inter_700Bold' },
+  emptyCard: { padding: 24, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', alignItems: 'center', marginBottom: 24 },
+  emptyText: { fontSize: 14, fontFamily: 'Inter_500Medium' },
+  journalBlock: { paddingLeft: 16, borderLeftWidth: 3 },
+  journalPrompt: { fontSize: 13, fontFamily: 'Inter_500Medium', fontStyle: 'italic', marginBottom: 8 },
+  journalResponse: { fontSize: 15, fontFamily: 'Inter_400Regular', lineHeight: 24 },
+  relapseCard: { padding: 16, borderRadius: 12, marginBottom: 8 },
+  relapseName: { fontSize: 13, fontFamily: 'Inter_700Bold', marginBottom: 4 },
+  relapseText: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 22 },
+});
 
 const styles = StyleSheet.create({
   root: {
@@ -909,16 +838,17 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   daysGrid: {
+    flex: 1,
+  },
+  weekRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    width: '100%',
   },
   dayCell: {
-    width: '14.28%',
-    aspectRatio: 0.95,
+    flex: 1,
+    height: 50,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 2,
-    marginBottom: 4,
   },
   dayCellSelected: {
     borderRadius: 12,
@@ -956,174 +886,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     justifyContent: 'center',
   },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  legendText: {
-    fontSize: 10,
-    fontFamily: 'Inter_500Medium',
-  },
-  modalRoot: {
-    flex: 1,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-  },
-  modalHeaderTitle: {
-    fontSize: 18,
-    fontFamily: 'Inter_700Bold',
-  },
-  modalTodayBadge: {
-    fontSize: 8,
-    fontFamily: 'Inter_700Bold',
-    letterSpacing: 1.5,
-    marginTop: 2,
-  },
-  modalCloseBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalContent: {
-    padding: 16,
-    gap: 16,
-    paddingBottom: 60,
-  },
-  modalScoreBanner: {
-    padding: 16,
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  modalScoreLeft: {
-    gap: 2,
-  },
-  modalScoreVal: {
-    fontSize: 32,
-    fontFamily: 'Inter_700Bold',
-    color: '#FFFFFF',
-  },
-  modalScoreLabel: {
-    fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#FFFFFF',
-    opacity: 0.8,
-  },
-  modalSection: {
-    gap: 10,
-  },
-  modalSectionTitle: {
-    fontSize: 10,
-    fontFamily: 'Inter_700Bold',
-    letterSpacing: 1.5,
-    marginBottom: 2,
-  },
-  modalProgressBarBg: {
-    height: 6,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  modalProgressBarFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  modalLogRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-  },
-  modalLogMetricName: {
-    flex: 1,
-    fontSize: 14,
-    fontFamily: 'Inter_500Medium',
-  },
-  modalLogValue: {
-    fontSize: 13,
-    fontFamily: 'Inter_700Bold',
-  },
-  modalEmptyCard: {
-    padding: 24,
-    alignItems: 'center',
-    gap: 8,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-  },
-  modalEmptyText: {
-    fontSize: 13,
-    fontFamily: 'Inter_500Medium',
-  },
-  modalJournalBlock: {
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 12,
-  },
-  modalJournalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  modalTagsRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  modalJournalTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  modalJournalTagText: {
-    fontSize: 10,
-    fontFamily: 'Inter_700Bold',
-  },
-  modalJournalWords: {
-    fontSize: 11,
-    fontFamily: 'Inter_500Medium',
-  },
-  modalJournalPrompt: {
-    fontSize: 13,
-    fontFamily: 'Inter_600SemiBold',
-    fontStyle: 'italic',
-  },
-  modalJournalResponse: {
-    fontSize: 14,
-    fontFamily: 'Inter_400Regular',
-    lineHeight: 20,
-  },
-  modalDivider: {
-    height: 1,
-    marginVertical: 4,
-  },
-  modalJournalSectionSub: {
-    fontSize: 11,
-    fontFamily: 'Inter_700Bold',
-    letterSpacing: 1,
-  },
-  modalRelapseCard: {
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 6,
-  },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  legendText: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
   modalRelapseHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1139,3 +904,89 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
+
+// ─── Wizard WeekRow Component ───────────────────────────────────────────────
+function WeekRow({
+  week, weekIndex, selectedWeekIndex, isSelectedView, viewYear, viewMonth,
+  todayStr, selectedDate, setSelectedDate, journalEntries, relapseLogs, getDayColor, pulseAnim, colors
+}: any) {
+  const rowStyle = useAnimatedStyle(() => {
+    const isVisible = !isSelectedView || weekIndex === selectedWeekIndex;
+    return {
+      height: withTiming(isVisible ? 50 : 0, { duration: 300 }),
+      opacity: withTiming(isVisible ? 1 : 0, { duration: 250 }),
+      overflow: 'hidden',
+    };
+  }, [isSelectedView, selectedWeekIndex, weekIndex]);
+
+  return (
+    <AnimatedReanimated.View style={[styles.weekRow, rowStyle]}>
+      {week.map((day: number | null, i: number) => {
+        if (!day) return <View key={`empty-${i}`} style={styles.dayCell} />;
+        
+        const ds = dateStr(viewYear, viewMonth, day);
+        const isFut = ds > todayStr;
+        const cellColor = getDayColor(ds);
+        const isSelected = selectedDate === ds;
+        const hasJournal = journalEntries.some((e: any) => e.date === ds);
+        const hasRelapse = relapseLogs.some((r: any) => r.date === ds);
+        const todayDay = ds === todayStr;
+
+        const cellContent = (
+          <View
+            style={[
+              styles.dayNumBg,
+              todayDay && {
+                backgroundColor: cellColor ? cellColor + '20' : colors.brand.primaryGlowSoft,
+                borderWidth: 1.5,
+                borderColor: cellColor ?? colors.brand.primary,
+              },
+              !todayDay && cellColor && { backgroundColor: cellColor + '1C' },
+            ]}
+          >
+            <Text
+              style={[
+                styles.dayNum,
+                { color: colors.textSecondary },
+                todayDay && { color: cellColor ?? colors.brand.primaryLight, fontFamily: 'Inter_700Bold' },
+                !todayDay && cellColor && { color: cellColor, fontFamily: 'Inter_700Bold' },
+              ]}
+            >
+              {day}
+            </Text>
+          </View>
+        );
+
+        return (
+          <TouchableOpacity
+            key={day}
+            onPress={() => {
+              if (!isFut) {
+                if (selectedDate === ds) setSelectedDate(null);
+                else setSelectedDate(ds);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              }
+            }}
+            style={[
+              styles.dayCell,
+              isSelected && [styles.dayCellSelected, { backgroundColor: colors.pressed, borderColor: colors.brand.primary + '50' }],
+              isFut && { opacity: 0.2 },
+            ]}
+            activeOpacity={isFut ? 1 : 0.7}
+          >
+            {todayDay ? (
+              <Animated.View style={{ transform: [{ scale: pulseAnim }], width: '100%', alignItems: 'center' }}>
+                {cellContent}
+              </Animated.View>
+            ) : cellContent}
+            
+            <View style={styles.indicatorRow}>
+              {hasJournal && <View style={[styles.miniDot, { backgroundColor: colors.brand.calm }]} />}
+              {hasRelapse && <View style={[styles.miniDot, { backgroundColor: colors.brand.danger }]} />}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+    </AnimatedReanimated.View>
+  );
+}

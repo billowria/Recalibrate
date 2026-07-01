@@ -1,9 +1,9 @@
 /**
- * Discipline OS — Premium Design System
+ * Discipline OS — Premium Design System (Soft UI Edition)
  * 
- * Color palette built for an OLED-first dark mode experience with
- * glassmorphism, glow effects, and a cohesive brand identity.
- * All colors are calibrated for WCAG AA+ contrast.
+ * Color palette built for a dual-theme Soft UI experience.
+ * Features Neomorphic soft shadows, glassmorphism, glowing accents, 
+ * and a cohesive brand identity.
  */
 
 // ─── Brand Identity ──────────────────────────────────────────────────────────
@@ -53,13 +53,13 @@ export const SCORE_COLORS = {
   starting: '#8B8FA8',     // 0-39: muted (not red — this is the start, not a failure)
 } as const;
 
-// ─── Dark Mode Palette (OLED-optimized) ─────────────────────────────────────
+// ─── Dark Mode Palette (Soft OLED-optimized) ────────────────────────────────
 const dark = {
   // Base layers
-  background: '#000000',       // True OLED black
+  background: '#050508',       // Very deep charcoal/OLED base
   surface: '#0A0A12',          // Slightly lifted from black
-  surfaceMid: '#0F0F1A',       // Cards, modals
-  surfaceHigh: '#141425',      // Elevated elements
+  surfaceMid: '#12121E',       // Cards, modals
+  surfaceHigh: '#1A1A2A',      // Elevated elements
   surfaceGlass: 'rgba(15, 15, 26, 0.80)', // Glassmorphism base
 
   // Text
@@ -97,8 +97,8 @@ const dark = {
   scoreBuilding: SCORE_COLORS.building,
   scoreStarting: SCORE_COLORS.starting,
 
-  // Legacy compatibility (keep these)
-  card: '#0F0F1A',
+  // Legacy compatibility
+  card: '#12121E',
   cardForeground: '#F0F0FF',
   destructive: BRAND.danger,
   destructiveForeground: '#FFFFFF',
@@ -108,27 +108,27 @@ const dark = {
   scoreGreen: SCORE_COLORS.excellent,
   scoreYellow: SCORE_COLORS.building,
   scoreRed: BRAND.danger,
-  surface2: '#0F0F1A',
-  surfaceSecondary: '#141425',
+  surface2: '#12121E',
+  surfaceSecondary: '#1A1A2A',
 } as const;
 
-// ─── Light Mode Palette ───────────────────────────────────────────────────────
+// ─── Light Mode Palette (Soft UI Standard) ──────────────────────────────────
 const light = {
-  background: '#F4F4FF',
-  surface: '#FFFFFF',
-  surfaceMid: '#F0F0FF',
-  surfaceHigh: '#E8E8FF',
+  background: '#F8F9FA',      // Soft warm off-white
+  surface: '#FFFFFF',         // Pure white cards
+  surfaceMid: '#F0F2F5',      // Slightly inset areas (like inputs)
+  surfaceHigh: '#E9ECEF',     // Hover/Active states
   surfaceGlass: 'rgba(255, 255, 255, 0.85)',
 
-  text: '#0A0A1A',
-  textSecondary: '#404060',
-  textMuted: '#7070A0',
-  textDim: '#B0B0D0',
-  foreground: '#0A0A1A',
-  foregroundSecondary: '#404060',
+  text: '#252F40',            // Deep slate for readability (not harsh black)
+  textSecondary: '#67748E',   // Muted slate
+  textMuted: '#8392AB',       // Gray
+  textDim: '#CBD5E1',         // Very dim
+  foreground: '#252F40',
+  foregroundSecondary: '#67748E',
 
-  border: '#E0E0F0',
-  borderSubtle: '#EBEBFF',
+  border: '#E2E8F0',
+  borderSubtle: '#F1F5F9',
   borderFocus: BRAND.primary,
   borderGlass: 'rgba(91, 94, 255, 0.12)',
 
@@ -138,29 +138,29 @@ const light = {
   tint: BRAND.primary,
   primary: BRAND.primary,
   primaryForeground: '#FFFFFF',
-  secondary: '#EBEBFF',
-  secondaryForeground: '#0A0A1A',
+  secondary: '#E9ECEF',
+  secondaryForeground: '#252F40',
   accent: BRAND.primaryDark,
   accentForeground: '#FFFFFF',
-  muted: '#F0F0FF',
-  mutedForeground: '#7070A0',
+  muted: '#F0F2F5',
+  mutedForeground: '#8392AB',
 
   scoreExcellent: SCORE_COLORS.excellent,
-  scoreGood: '#0099CC',
-  scoreBuilding: '#CC8800',
-  scoreStarting: '#808098',
+  scoreGood: '#00D2FF',
+  scoreBuilding: '#FFB700',
+  scoreStarting: '#8392AB',
 
   card: '#FFFFFF',
-  cardForeground: '#0A0A1A',
-  destructive: '#E53935',
+  cardForeground: '#252F40',
+  destructive: BRAND.danger,
   destructiveForeground: '#FFFFFF',
-  input: '#E0E0F0',
+  input: '#FFFFFF',
 
   scoreGreen: SCORE_COLORS.excellent,
-  scoreYellow: '#CC8800',
-  scoreRed: '#E53935',
-  surface2: '#F0F0FF',
-  surfaceSecondary: '#E8E8FF',
+  scoreYellow: '#FFB700',
+  scoreRed: BRAND.danger,
+  surface2: '#F8F9FA',
+  surfaceSecondary: '#F0F2F5',
 } as const;
 
 // ─── Gradients ────────────────────────────────────────────────────────────────
@@ -168,6 +168,12 @@ export const GRADIENTS = {
   // Primary brand gradient
   primary: ['#5B5EFF', '#7C7FFF', '#00D2FF'] as [string, string, ...string[]],
   primaryShort: ['#5B5EFF', '#7C7FFF'] as [string, string, ...string[]],
+  
+  // Soft UI colorful accents
+  softPink: ['#FF0080', '#7928CA'] as [string, string, ...string[]],
+  softBlue: ['#21D4FD', '#2152FF'] as [string, string, ...string[]],
+  softGreen: ['#98EC2D', '#17AD37'] as [string, string, ...string[]],
+  softWarning: ['#FBCF33', '#F53939'] as [string, string, ...string[]],
 
   // Score ring gradients
   scoreExcellent: ['#00D68F', '#4DE8FF'] as [string, string, ...string[]],
@@ -194,19 +200,36 @@ export const GRADIENTS = {
 
 // ─── Shadows & Glows ─────────────────────────────────────────────────────────
 export const SHADOWS = {
+  // Soft UI Primary Drop Shadow
+  softLight: {
+    shadowColor: '#8392AB', // Slate gray shadow
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.15,
+    shadowRadius: 15,
+    elevation: 5,
+  },
+  softDark: {
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.35,
+    shadowRadius: 15,
+    elevation: 8,
+  },
+  
+  // Legacy shadows updated for better softness
   card: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 8,
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 6,
   },
   cardLarge: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 24,
-    elevation: 12,
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
   },
   primaryGlow: {
     shadowColor: BRAND.primary,
@@ -225,8 +248,8 @@ export const SHADOWS = {
   tab: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 20,
+    shadowOpacity: 0.1,
+    shadowRadius: 15,
     elevation: 16,
   },
 } as const;
@@ -249,8 +272,8 @@ export const RADIUS = {
   lg: 18,
   xl: 24,
   pill: 999,
-  card: 18,
-  button: 14,
+  card: 20, // Increased for softer UI
+  button: 16, // Soft UI pill-like buttons
   input: 12,
 } as const;
 

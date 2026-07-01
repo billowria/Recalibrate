@@ -1,59 +1,70 @@
 import React from 'react';
-import { Animated, StyleSheet, View, ViewStyle } from 'react-native';
+import { StyleSheet, View, ViewStyle } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Platform } from 'react-native';
-import { BRAND, RADIUS } from '@/constants/colors';
+import { useColors } from '@/hooks/useColors';
 
 interface GlassCardProps {
   children: React.ReactNode;
   style?: ViewStyle | ViewStyle[];
+  variant?: 'glass' | 'soft'; // New Soft UI variant
   intensity?: number;
   tint?: 'light' | 'dark' | 'default';
   borderColor?: string;
   glowColor?: string;
   elevated?: boolean;
-  animated?: boolean;
 }
 
 /**
- * GlassCard — Premium glassmorphism card component.
+ * GlassCard — Premium dual-mode card component.
  * 
- * On iOS: Uses expo-blur for true backdrop blur.
- * On Android/Web: Simulates glass with semi-transparent background.
- *
- * Features:
- * - Configurable blur intensity and tint
- * - Optional colored glow border
- * - Optional elevation shadow
- * - Subtle inner highlight at top edge (glass refraction effect)
+ * Variants:
+ * - 'glass': Uses expo-blur (iOS) or transparency (Android) for a frosted glass look.
+ * - 'soft': Solid color with soft Neomorphic drop shadow based on the current theme.
  */
 export function GlassCard({
   children,
   style,
+  variant = 'glass',
   intensity = 40,
-  tint = 'dark',
-  borderColor = 'rgba(255,255,255,0.08)',
+  tint,
+  borderColor,
   glowColor,
-  elevated = false,
+  elevated = true,
 }: GlassCardProps) {
+  const colors = useColors();
   const isIOS = Platform.OS === 'ios';
 
+  const isSoft = variant === 'soft';
+  const defaultTint = colors.isDark ? 'dark' : 'light';
+  const activeTint = tint || defaultTint;
+  
+  // Soft UI Shadows
+  const softShadow = colors.isDark ? colors.shadows.softDark : colors.shadows.softLight;
+  
   const containerStyle: ViewStyle = {
-    borderRadius: RADIUS.card,
+    borderRadius: colors.radius2.card,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: glowColor
-      ? `${glowColor}50`
-      : borderColor,
+    borderColor: glowColor 
+      ? `${glowColor}50` 
+      : (borderColor || (isSoft ? colors.border : colors.borderGlass)),
+      
+    // Apply shadows if elevated (and apply Soft UI shadow if it's the soft variant)
     ...(elevated
-      ? {
-          shadowColor: glowColor || '#000',
-          shadowOffset: { width: 0, height: 8 },
-          shadowOpacity: glowColor ? 0.35 : 0.25,
-          shadowRadius: 20,
-          elevation: 10,
-        }
+      ? (isSoft 
+          ? softShadow 
+          : {
+              shadowColor: glowColor || (colors.isDark ? '#000' : '#8392AB'),
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: glowColor ? 0.35 : 0.15,
+              shadowRadius: 20,
+              elevation: 10,
+            })
       : {}),
+      
+    // Solid background for soft variant
+    ...(isSoft && { backgroundColor: colors.surface }),
   };
 
   const innerStyle: ViewStyle = {
@@ -62,12 +73,22 @@ export function GlassCard({
     overflow: 'hidden',
   };
 
+  // ─── SOFT VARIANT (Solid Background) ────────────────────────────────────────
+  if (isSoft) {
+    return (
+      <View style={[containerStyle, style]}>
+        <View style={innerStyle}>{children}</View>
+      </View>
+    );
+  }
+
+  // ─── GLASS VARIANT (Frosted) ────────────────────────────────────────────────
   if (isIOS) {
     return (
       <View style={[containerStyle, style]}>
         <BlurView
           intensity={intensity}
-          tint={tint}
+          tint={activeTint}
           style={[StyleSheet.absoluteFill]}
         />
         {/* Top highlight (glass refraction) */}
@@ -77,50 +98,38 @@ export function GlassCard({
     );
   }
 
-  // Android/Web fallback
+  // Android/Web glass fallback
   return (
     <View
       style={[
         containerStyle,
         {
           backgroundColor:
-            tint === 'dark'
+            activeTint === 'dark'
               ? 'rgba(10, 10, 20, 0.85)'
-              : 'rgba(255, 255, 255, 0.12)',
+              : 'rgba(255, 255, 255, 0.70)', // Light mode fallback
         },
         style,
       ]}
     >
-      {/* Top highlight */}
       <View style={styles.highlight} />
       {children}
     </View>
   );
 }
 
-// Simpler card for basic usage (no blur)
+// Keeping SolidCard for backwards compatibility, but it just wraps GlassCard now
 interface SolidCardProps {
   children: React.ReactNode;
   style?: ViewStyle | ViewStyle[];
   color?: string;
 }
 
-export function SolidCard({ children, style, color = '#0F0F1A' }: SolidCardProps) {
+export function SolidCard({ children, style, color }: SolidCardProps) {
   return (
-    <View
-      style={[
-        {
-          backgroundColor: color,
-          borderRadius: RADIUS.card,
-          borderWidth: 1,
-          borderColor: 'rgba(255,255,255,0.06)',
-          overflow: 'hidden',
-        },
-        style,
-      ]}
-    >
+    <GlassCard variant="soft" style={[{ backgroundColor: color }, style]}>
       {children}
-    </View>
+    </GlassCard>
   );
 }
 

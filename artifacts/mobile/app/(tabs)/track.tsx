@@ -1,8 +1,14 @@
+/**
+ * TRACKER — Protocol Board
+ * 
+ * Swiss Design Language. Every element earns its place.
+ * Compact hold to commit. Weekly accountability grid. Program-grouped.
+ */
+
 import * as Haptics from 'expo-haptics';
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Alert,
-  Animated,
   Dimensions,
   KeyboardAvoidingView,
   Modal,
@@ -14,1066 +20,1436 @@ import {
   TouchableOpacity,
   View,
   Pressable,
+  Keyboard,
 } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/context/AppContext';
-import { useColors } from '@/hooks/useColors';
 import { TrackedMetric, DailyLog, HabitContext } from '@/context/AppContext';
-import { GlassCard } from '@/components/GlassCard';
 import { LinearGradient } from 'expo-linear-gradient';
 import AnimatedReanimated, {
   useSharedValue,
   useAnimatedStyle,
+  useAnimatedReaction,
   withSpring,
   withTiming,
-  Easing as ReanimatedEasing,
+  withDelay,
+  runOnJS,
+  interpolate,
+  Easing as RAEasing,
 } from 'react-native-reanimated';
+import { router, useFocusEffect } from 'expo-router';
+import { useColors } from '@/hooks/useColors';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+const { width: SW } = Dimensions.get('window');
+
+// ─── Design tokens ────────────────────────────────────────────────────────────
+const T = {
+  bg:        '#080808',
+  surface:   '#0F0F0F',
+  card:      '#141414',
+  cardRaise: '#1A1A1A',
+  border:    '#1E1E1E',
+  borderMid: '#252525',
+  text:      '#F0F0F0',
+  textMid:   '#888888',
+  textDim:   '#444444',
+  violet:    '#7B5EFF',
+  violetDim: '#7B5EFF22',
+  green:     '#22D37A',
+  red:       '#FF5E5E',
+  amber:     '#FFB340',
+};
+
+function getThemeT(colors: any) {
+  return {
+    bg:        colors.background,
+    surface:   colors.surface,
+    card:      colors.surfaceMid,
+    cardRaise: colors.surfaceHigh,
+    border:    colors.border,
+    borderMid: colors.borderSubtle,
+    text:      colors.text,
+    textMid:   colors.textSecondary,
+    textDim:   colors.textMuted,
+    violet:    colors.brand.primary,
+    violetDim: colors.brand.primaryGlowSoft,
+    green:     colors.brand.success,
+    red:       colors.brand.danger,
+    amber:     colors.brand.warning,
+  };
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function getMiniSparkline(logs: { value: number }[]): string {
-  const blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-  return logs.slice(-7).map(l => {
-    if (l.value < 0) return '·';
-    const v = Math.min(l.value === 0 ? 0 : (l.value / 10), 1);
-    return blocks[Math.floor(v * 7)] ?? '▁';
-  }).join('');
+function getLocalDateString(d: Date = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
+
+function getThisWeekDates(): string[] {
+  const today = new Date();
+  const dow = today.getDay(); // 0=Sun
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - ((dow + 6) % 7));
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return getLocalDateString(d);
+  });
+}
+
+function getLast14Days(): string[] {
+  const arr = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    arr.push(getLocalDateString(d));
+  }
+  return arr;
+}
+
+const WEEK_DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
 function isGood(metric: TrackedMetric, value: number | undefined): boolean {
   if (value === undefined) return false;
-  if (metric.category === 'build') return value > 0;
   if (metric.category === 'reduce') return value === 0;
   return value > 0;
 }
 
-// ─── Circular Ring ────────────────────────────────────────────────────────────
-function CircularRing({ pct, size, strokeW, color, children }: {
-  pct: number; size: number; strokeW: number; color: string; children?: React.ReactNode;
-}) {
+function getFriendlyInputTypeName(type: string): string {
+  if (type === 'boolean') return 'Check-off (Yes/No)';
+  if (type === 'counter') return 'Tally Count';
+  if (type === 'scale') return '1-10 Rating';
+  return type;
+}
+
+// ─── Animated Weekly Bar Chart (from Dashboard) ────────────────────────────────
+interface DayData {
+  date: string;
+  score: number | null;
+  isToday: boolean;
+  isFuture: boolean;
+}
+
+function WeeklyBarChart({ days, isVisible, triggerKey }: { days: DayData[]; isVisible: boolean; triggerKey: number }) {
   const colors = useColors();
+  const T = getThemeT(colors);
+  const animationProgress = useSharedValue(0);
+
+  useEffect(() => {
+    if (isVisible) {
+      animationProgress.value = 0;
+      animationProgress.value = withDelay(200, withSpring(1, { damping: 14, stiffness: 90 }));
+    } else {
+      animationProgress.value = 0;
+    }
+  }, [days, isVisible, triggerKey]);
+
   return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      {/* track */}
-      <View style={{
-        position: 'absolute', width: size, height: size, borderRadius: size / 2,
-        borderWidth: strokeW, borderColor: colors.border, opacity: 0.5,
-      }} />
-      {/* filled arc using simple rotate/border rendering */}
-      <View style={{
-        position: 'absolute', width: size, height: size, borderRadius: size / 2,
-        borderWidth: strokeW,
-        borderTopColor: color,
-        borderRightColor: pct > 0.25 ? color : 'transparent',
-        borderBottomColor: pct > 0.5 ? color : 'transparent',
-        borderLeftColor: pct > 0.75 ? color : 'transparent',
-        transform: [{ rotate: '-90deg' }],
-      }} />
-      {children}
+    <View style={wbcStyles.container}>
+      {days.map((day) => {
+        const d = new Date(day.date + 'T12:00:00');
+        const dayLabel = d.toLocaleDateString('en-US', { weekday: 'short' }).substring(0, 3);
+        const dateNum = d.getDate();
+
+        const score = day.score ?? 0;
+        const targetHeight = Math.max(8, (score / 100) * 80); 
+
+        let barColor: string = T.border;
+        let isUnlogged = day.score === null;
+
+        if (day.score !== null) {
+          if (day.score >= 70) barColor = T.green;
+          else if (day.score >= 40) barColor = T.amber;
+          else barColor = T.red;
+        }
+
+        const animatedStyle = useAnimatedStyle(() => {
+          return {
+            height: animationProgress.value * targetHeight,
+          };
+        });
+
+        const animatedScoreStyle = useAnimatedStyle(() => {
+          return {
+            opacity: withTiming(animationProgress.value, { duration: 300 }),
+            transform: [{ translateY: (1 - animationProgress.value) * 6 }],
+          };
+        });
+
+        return (
+          <View key={day.date} style={[wbcStyles.dayCol, { opacity: day.isFuture ? 0.35 : 1 }]}>
+            <View style={wbcStyles.barContainer}>
+              {isUnlogged ? (
+                <>
+                  <View style={wbcStyles.scoreWrap}>
+                    <Text style={wbcStyles.unloggedText}>--</Text>
+                  </View>
+                  <View style={[wbcStyles.unloggedDot, { borderColor: day.isToday ? T.violet : T.border }]} />
+                </>
+              ) : (
+                <>
+                  <AnimatedReanimated.View style={[animatedScoreStyle, wbcStyles.scoreWrap]}>
+                    <Text style={[wbcStyles.scoreText, { color: barColor }]}>{day.score}</Text>
+                  </AnimatedReanimated.View>
+                  <AnimatedReanimated.View style={[animatedStyle, { width: 10, borderRadius: 5, backgroundColor: barColor }]} />
+                </>
+              )}
+            </View>
+            <Text style={[wbcStyles.dayLabel, { color: day.isToday ? T.violet : T.textMid }]}>{dayLabel}</Text>
+            <Text style={[wbcStyles.dateNum, { color: day.isToday ? T.violet : T.textDim }]}>{dateNum}</Text>
+          </View>
+        );
+      })}
     </View>
   );
 }
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-const TRIGGERS = [
-  { key: 'stress', label: 'Stress', emoji: '😰' },
-  { key: 'boredom', label: 'Boredom', emoji: '😑' },
-  { key: 'social', label: 'Social', emoji: '👥' },
-  { key: 'habit', label: 'Auto-pilot', emoji: '🤖' },
-  { key: 'craving', label: 'Craving', emoji: '🤤' },
-  { key: 'other', label: 'Other', emoji: '🤷' },
-] as const;
+const wbcStyles = StyleSheet.create({
+  container: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', height: 130, paddingVertical: 10 },
+  dayCol: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
+  barContainer: { height: 90, justifyContent: 'flex-end', width: '100%', alignItems: 'center' },
+  scoreWrap: { marginBottom: 4, height: 16, justifyContent: 'center' },
+  unloggedText: { fontSize: 9, fontFamily: 'Inter_700Bold', color: T.textDim },
+  unloggedDot: { width: 10, height: 8, borderRadius: 4, borderWidth: 1.5, borderStyle: 'dashed', backgroundColor: 'transparent' },
+  scoreText: { fontSize: 9, fontFamily: 'Inter_700Bold' },
+  dayLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', marginTop: 6 },
+  dateNum: { fontSize: 9, fontFamily: 'Inter_500Medium', marginTop: 1 },
+});
 
-const SETTINGS = [
-  { key: 'home', label: 'Home', emoji: '🏠' },
-  { key: 'work', label: 'Work', emoji: '💼' },
-  { key: 'social', label: 'Social', emoji: '🎉' },
-  { key: 'commute', label: 'Commute', emoji: '🚌' },
-  { key: 'other', label: 'Other', emoji: '📍' },
-] as const;
-
-// ─── Intensity Dots (Slider alternative) ──────────────────────────────────────
-function IntensityDots({ value, onChange, color, label }: {
-  value: number; onChange: (v: number) => void; color: string; label: string;
+// ─── Compact Hold to Commit Button (Size 38) ──────────────────────────────────
+function HoldToLogCompact({
+  color, onComplete, completed, disabled = false, size = 38, duration = 800,
+}: {
+  color: string; onComplete: () => void; completed: boolean;
+  disabled?: boolean; size?: number; duration?: number;
 }) {
   const colors = useColors();
+  const T = getThemeT(colors);
+  const progress = useSharedValue(0);
+  const scale = useSharedValue(1);
+
+  const triggerTick = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const triggerDone = () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+  useAnimatedReaction(
+    () => progress.value,
+    (cur, prev) => {
+      if (!prev) return;
+      const steps = 10;
+      if (Math.floor(cur * steps) > Math.floor(prev * steps) && cur < 1) runOnJS(triggerTick)();
+    }
+  );
+
+  const handlePressIn = () => {
+    if (disabled || completed) return;
+    scale.value = withSpring(0.92, { damping: 15 });
+    progress.value = withTiming(1, { duration, easing: RAEasing.bezier(0.25, 1, 0.5, 1) }, (fin) => {
+      if (fin) { runOnJS(triggerDone)(); runOnJS(onComplete)(); }
+    });
+  };
+  const handlePressOut = () => {
+    if (disabled || completed) return;
+    scale.value = withSpring(1, { damping: 15 });
+    if (progress.value < 1) progress.value = withTiming(0, { duration: 300 });
+  };
+
+  const ringStyle = useAnimatedStyle(() => ({
+    borderColor: completed ? color : progress.value > 0 ? color : T.borderMid,
+    transform: [{ scale: scale.value }],
+  }));
+
+  const progressStyle = useAnimatedStyle(() => ({
+    height: `${progress.value * 100}%` as any,
+    width: `${progress.value * 100}%` as any,
+    borderRadius: (size * progress.value) / 2,
+  }));
+
   return (
-    <View style={csStyles.dotRow}>
-      <Text style={[csStyles.dotLabel, { color: colors.textSecondary }]}>{label}</Text>
-      <View style={csStyles.dots}>
-        {[1, 2, 3, 4, 5].map(n => (
-          <TouchableOpacity
-            key={n} onPress={() => { onChange(n); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-            style={[csStyles.dot, { backgroundColor: value >= n ? color : colors.border, transform: [{ scale: value === n ? 1.2 : 1 }] }]}
-            activeOpacity={0.7}
-          />
-        ))}
-      </View>
-      <Text style={[csStyles.dotNum, { color }]}>{value || '–'}/5</Text>
+    <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut} disabled={disabled} style={{ width: size, height: size }}>
+      <AnimatedReanimated.View style={[
+        htlCompactStyles.circle,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: completed ? color : T.cardRaise,
+          borderColor: completed ? color : T.border,
+        },
+        ringStyle
+      ]}>
+        {!completed && (
+          <AnimatedReanimated.View style={[htlCompactStyles.circleFill, { backgroundColor: color + '35' }, progressStyle]} />
+        )}
+        {completed ? (
+          <Ionicons name="checkmark-sharp" size={16} color="#000" />
+        ) : (
+          <Ionicons name="finger-print-outline" size={16} color={progress.value > 0 ? color : T.textDim} />
+        )}
+      </AnimatedReanimated.View>
+    </Pressable>
+  );
+}
+
+const htlCompactStyles = StyleSheet.create({
+  circle: { borderWidth: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  circleFill: { position: 'absolute', alignSelf: 'center' },
+});
+
+// ─── Compact Hold to Delete Button ────────────────────────────────────────────
+function HoldToDeleteAction({
+  onDelete, size = 50, duration = 800
+}: {
+  onDelete: () => void; size?: number; duration?: number;
+}) {
+  const colors = useColors();
+  const T = getThemeT(colors);
+  const progress = useSharedValue(0);
+  const scale = useSharedValue(1);
+
+  const triggerTick = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+  useAnimatedReaction(
+    () => progress.value,
+    (cur, prev) => {
+      if (!prev) return;
+      const steps = 10;
+      if (Math.floor(cur * steps) > Math.floor(prev * steps) && cur < 1) runOnJS(triggerTick)();
+    }
+  );
+
+  const handlePressIn = () => {
+    scale.value = withSpring(0.92, { damping: 15 });
+    progress.value = withTiming(1, { duration, easing: RAEasing.bezier(0.25, 1, 0.5, 1) }, (fin) => {
+      if (fin) runOnJS(onDelete)();
+    });
+  };
+  const handlePressOut = () => {
+    scale.value = withSpring(1, { damping: 15 });
+    if (progress.value < 1) progress.value = withTiming(0, { duration: 300 });
+  };
+
+  const ringStyle = useAnimatedStyle(() => ({
+    borderColor: progress.value > 0 ? T.red : T.borderMid,
+    transform: [{ scale: scale.value }],
+  }));
+
+  const progressStyle = useAnimatedStyle(() => ({
+    height: `${progress.value * 100}%` as any,
+    width: `${progress.value * 100}%` as any,
+    borderRadius: (size * progress.value) / 2,
+  }));
+
+  return (
+    <View style={hrStyles.deleteActionWrap}>
+      <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut} style={{ width: size, height: size }}>
+        <AnimatedReanimated.View style={[
+          htlCompactStyles.circle,
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: T.cardRaise,
+            borderColor: T.border,
+          },
+          ringStyle
+        ]}>
+          <AnimatedReanimated.View style={[htlCompactStyles.circleFill, { backgroundColor: T.red + '40' }, progressStyle]} />
+          <Ionicons name="trash-outline" size={20} color={progress.value > 0.8 ? '#FFF' : T.red} />
+        </AnimatedReanimated.View>
+      </Pressable>
     </View>
   );
 }
 
-// ─── Context Log Sheet ────────────────────────────────────────────────────────
-function ContextSheet({ metric, existingLog, onSave, onCancel, colors }: {
-  metric: TrackedMetric;
-  existingLog?: DailyLog;
-  onSave: (value: number, ctx: HabitContext) => void;
-  onCancel: () => void;
-  colors: any;
+// ─── Weekly Dot Row with initials instead of ticks ────────────────────────────
+function WeekDots({ metric, weekDates, today, color }: {
+  metric: TrackedMetric; weekDates: string[]; today: string; color: string;
 }) {
+  const colors = useColors();
+  const T = getThemeT(colors);
+  const { getLogForDate } = useApp();
+  return (
+    <View style={wdStyles.row}>
+      {weekDates.map((date, i) => {
+        const log = getLogForDate(metric.id, date);
+        const done = isGood(metric, log?.value);
+        const isToday = date === today;
+        const isFuture = date > today;
+        const letter = WEEK_DAYS[i];
+
+        return (
+          <View key={date} style={wdStyles.cell}>
+            <View style={[
+              wdStyles.dot,
+              {
+                backgroundColor: done ? color : 'transparent',
+                borderWidth: 1,
+                borderColor: done ? color : isToday ? color : T.borderMid,
+                opacity: isFuture ? 0.35 : 1,
+              }
+            ]}>
+              <Text style={[
+                wdStyles.dotText,
+                {
+                  color: done ? '#000' : isToday ? color : T.textMid,
+                  fontFamily: done || isToday ? 'Inter_700Bold' : 'Inter_500Medium',
+                }
+              ]}>
+                {letter}
+              </Text>
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+const wdStyles = StyleSheet.create({
+  row: { flexDirection: 'row', gap: 6, paddingTop: 2 },
+  cell: { alignItems: 'center' },
+  dot: { width: 15, height: 15, borderRadius: 7.5, alignItems: 'center', justifyContent: 'center' },
+  dotText: { fontSize: 8, textAlign: 'center' },
+});
+
+// ─── HabitRow with Inline Analytics & Compact Adjusters ────────────────────────
+function HabitRow({
+  metric, today, weekDates, color, isCustomRoutine,
+}: {
+  metric: TrackedMetric; today: string; weekDates: string[]; color: string; isCustomRoutine?: boolean;
+}) {
+  const colors = useColors();
+  const T = getThemeT(colors);
+  const { logMetric, getLogForDate, getMetricStreak, getMetricConsistency, getLogsForMetric, deleteMetric } = useApp();
+  const [expanded, setExpanded] = useState(false);
+  const [activeTab, setActiveTab] = useState<'log' | 'history'>('log');
+
+  const log = getLogForDate(metric.id, today);
+  const streak = getMetricStreak(metric.id);
+  const consistency = getMetricConsistency(metric.id, 30);
+  const history = getLogsForMetric(metric.id, 14);
+
   const isReduce = metric.category === 'reduce';
   const isBool = metric.inputType === 'boolean';
   const isCounter = metric.inputType === 'counter';
+  const done = isGood(metric, log?.value);
 
-  const [counterVal, setCounterVal] = useState(existingLog?.value ?? 0);
-  const [boolDone, setBoolDone] = useState((existingLog?.value ?? 0) === 1);
-  const [scaleVal, setScaleVal] = useState(existingLog?.value ?? 5);
+  const expandVal = useSharedValue(0);
 
-  const [trigger, setTrigger] = useState<HabitContext['trigger']>(existingLog?.context?.trigger);
-  const [setting, setSetting] = useState<HabitContext['setting']>(existingLog?.context?.setting);
-  const [intensity, setIntensity] = useState(existingLog?.context?.intensity ?? 0);
-  const [quality, setQuality] = useState(existingLog?.context?.quality ?? 0);
-  const [note, setNote] = useState(existingLog?.context?.note ?? '');
-
-  const catColor = isReduce ? colors.brand.danger : metric.category === 'build' ? colors.brand.success : colors.brand.primary;
-
-  const getValue = () => {
-    if (isBool) return boolDone ? 1 : 0;
-    if (isCounter) return counterVal;
-    return scaleVal;
+  const toggleExpand = () => {
+    const next = !expanded;
+    setExpanded(next);
+    expandVal.value = withSpring(next ? 1 : 0, { damping: 18, stiffness: 150 });
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
+
+  const bodyStyle = useAnimatedStyle(() => ({
+    maxHeight: interpolate(expandVal.value, [0, 1], [0, 380]),
+    opacity: expandVal.value,
+    overflow: 'hidden',
+  }));
+
+  const [noteText, setNoteText] = useState(log?.note ?? '');
+  const [noteFocus, setNoteFocus] = useState(false);
+  
+  useEffect(() => {
+    setNoteText(log?.note ?? '');
+  }, [log?.note]);
+
+  const noteHasChanges = noteText !== (log?.note ?? '');
+  const showSaveBtn = noteFocus || noteHasChanges;
+  
+  const saveVal = useSharedValue(0);
+  useEffect(() => {
+    saveVal.value = withTiming(showSaveBtn ? 1 : 0, { duration: 250 });
+  }, [showSaveBtn]);
+
+  const saveBtnStyle = useAnimatedStyle(() => ({
+    opacity: saveVal.value,
+    maxHeight: interpolate(saveVal.value, [0, 1], [0, 60]),
+    marginTop: interpolate(saveVal.value, [0, 1], [0, 12]),
+  }));
+
+  const handleCommit = async () => {
+    if (isBool) {
+      await logMetric(metric.id, today, isReduce ? 0 : 1, undefined, {});
+    } else {
+      if (!expanded) toggleExpand();
+    }
+  };
+
+  const handleUnlog = () => {
+    Alert.alert('Unlog?', 'Remove today\'s log for this habit?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Unlog', style: 'destructive', onPress: () => logMetric(metric.id, today, -1, undefined, {}) },
+    ]);
+  };
+
+  const last14Days = useMemo(() => getLast14Days(), []);
+  const recentNotes = useMemo(() => {
+    return history.filter(h => h.note && h.note.trim() !== '').slice(-3).reverse();
+  }, [history]);
+
+  const handleDelete = async () => {
+    await deleteMetric(metric.id);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const renderRightActions = () => {
+    if (!isCustomRoutine) return null;
+    return (
+      <HoldToDeleteAction onDelete={handleDelete} />
+    );
+  };
+
+  const content = (
+    <View style={[
+      hrStyles.rowWrapper, 
+      { backgroundColor: T.surface, borderColor: T.border },
+      expanded && { borderColor: color + '40', backgroundColor: T.cardRaise }
+    ]}>
+      <View style={hrStyles.row}>
+        <TouchableOpacity
+          onPress={toggleExpand}
+          onLongPress={done ? handleUnlog : undefined}
+          style={hrStyles.leftCol}
+          activeOpacity={0.7}
+        >
+          <View style={[hrStyles.emojiBox, { backgroundColor: color + '15' }]}>
+            <Text style={hrStyles.emoji}>{metric.emoji ?? '•'}</Text>
+          </View>
+          <View style={hrStyles.nameSub}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={[hrStyles.name, { color: T.text }]} numberOfLines={1}>{metric.name}</Text>
+              {streak >= 3 && (
+                <View style={[hrStyles.streakPill, { backgroundColor: color + '20' }]}>
+                  <Text style={[hrStyles.streakText, { color }]}>{streak}🔥</Text>
+                </View>
+              )}
+            </View>
+            <WeekDots metric={metric} weekDates={weekDates} today={today} color={color} />
+          </View>
+        </TouchableOpacity>
+
+        {/* Compact interactive target */}
+        <View style={hrStyles.commitWrap}>
+          {isBool ? (
+            <HoldToLogCompact
+              color={done ? color : T.textDim}
+              completed={done}
+              onComplete={handleCommit}
+            />
+          ) : isCounter ? (
+            <View style={hrStyles.inlineCounter}>
+              <TouchableOpacity
+                onPress={async () => {
+                  const cur = log?.value ?? 0;
+                  if (cur > 0) {
+                    await logMetric(metric.id, today, cur - 1, undefined, {});
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }
+                }}
+                style={hrStyles.inlineBtn}
+              >
+                <Ionicons name="remove-sharp" size={12} color={T.textMid} />
+              </TouchableOpacity>
+              <Text style={[hrStyles.inlineVal, { color: done ? color : T.text }]}>{log?.value ?? 0}</Text>
+              <TouchableOpacity
+                onPress={async () => {
+                  const cur = log?.value ?? 0;
+                  await logMetric(metric.id, today, cur + 1, undefined, {});
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                }}
+                style={[hrStyles.inlineBtn, { borderColor: color + '40', backgroundColor: color + '10' }]}
+              >
+                <Ionicons name="add-sharp" size={12} color={color} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            // Scale rating type (1-10)
+            <View style={hrStyles.inlineCounter}>
+              <TouchableOpacity
+                onPress={async () => {
+                  const cur = log?.value ?? 6;
+                  if (cur > 1) {
+                    await logMetric(metric.id, today, cur - 1, undefined, {});
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }
+                }}
+                style={hrStyles.inlineBtn}
+              >
+                <Ionicons name="remove-sharp" size={12} color={T.textMid} />
+              </TouchableOpacity>
+              <Text style={[hrStyles.inlineVal, { color: done ? color : T.text }]}>{log?.value ?? '—'}</Text>
+              <TouchableOpacity
+                onPress={async () => {
+                  const cur = log?.value ?? 4;
+                  if (cur < 10) {
+                    await logMetric(metric.id, today, cur + 1, undefined, {});
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  }
+                }}
+                style={[hrStyles.inlineBtn, { borderColor: color + '40', backgroundColor: color + '10' }]}
+              >
+                <Ionicons name="add-sharp" size={12} color={color} />
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </View>
+
+      {/* Expanded Analytics & Extra Logs Tab */}
+      <AnimatedReanimated.View style={bodyStyle}>
+        <View style={hrStyles.expandContainer}>
+          {/* Tab Selector */}
+          <View style={hrStyles.tabBar}>
+            <TouchableOpacity
+              onPress={() => setActiveTab('log')}
+              style={[hrStyles.tabItem, activeTab === 'log' && { borderBottomColor: color }]}
+            >
+              <Text style={[hrStyles.tabText, activeTab === 'log' && { color: T.text }]}>Log Settings</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setActiveTab('history')}
+              style={[hrStyles.tabItem, activeTab === 'history' && { borderBottomColor: color }]}
+            >
+              <Text style={[hrStyles.tabText, activeTab === 'history' && { color: T.text }]}>History & Stats</Text>
+            </TouchableOpacity>
+          </View>
+
+          {activeTab === 'log' ? (
+            <View style={hrStyles.tabContent}>
+              <View style={hrStyles.noteInputContainer}>
+                <TextInput
+                  style={[hrStyles.noteInput, { borderColor: noteFocus ? color : T.border, backgroundColor: noteFocus ? color + '05' : T.surface, color: T.text }]}
+                  placeholder="Add reflections or notes..."
+                  placeholderTextColor={T.textDim}
+                  value={noteText}
+                  onChangeText={setNoteText}
+                  onFocus={() => setNoteFocus(true)}
+                  onBlur={() => setNoteFocus(false)}
+                  multiline
+                />
+              </View>
+              <AnimatedReanimated.View style={[saveBtnStyle, { overflow: 'hidden' }]}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    await logMetric(metric.id, today, log?.value ?? (isReduce ? 0 : 1), noteText, {});
+                    Keyboard.dismiss();
+                    setNoteFocus(false);
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  }}
+                  style={[hrStyles.saveBtn, { backgroundColor: color }]}
+                  activeOpacity={0.8}
+                >
+                  <Text style={hrStyles.saveBtnText}>Save Log & Note</Text>
+                </TouchableOpacity>
+              </AnimatedReanimated.View>
+
+              {done && (
+                <View style={{ marginTop: 12, alignItems: 'center' }}>
+                  <TouchableOpacity onPress={handleUnlog} style={hrStyles.unlogBtn}>
+                    <Text style={hrStyles.unlogBtnText}>Reset Today's Log</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          ) : (
+            <View style={hrStyles.tabContent}>
+              {/* Consistency & Streaks */}
+              <View style={hrStyles.statsGrid}>
+                <View style={hrStyles.statCard}>
+                  <Text style={[hrStyles.statVal, { color: T.text }]}>{consistency}%</Text>
+                  <Text style={hrStyles.statLbl}>30d Success</Text>
+                </View>
+                <View style={hrStyles.statCard}>
+                  <Text style={[hrStyles.statVal, { color: T.text }]}>{streak}d</Text>
+                  <Text style={hrStyles.statLbl}>Current Streak</Text>
+                </View>
+              </View>
+
+              {/* 14-day history dot grid */}
+              <Text style={hrStyles.gridTitle}>LAST 14 DAYS</Text>
+              <View style={hrStyles.gridDots}>
+                {last14Days.map((date) => {
+                  const dayLog = getLogForDate(metric.id, date);
+                  const isDayDone = isGood(metric, dayLog?.value);
+                  const shortDay = new Date(date + 'T12:00:00').getDate();
+                  return (
+                    <View key={date} style={hrStyles.gridDotWrap}>
+                      <View style={[
+                        hrStyles.gridDot,
+                        {
+                          backgroundColor: isDayDone ? color : T.border,
+                          borderColor: isDayDone ? color : T.borderMid,
+                        }
+                      ]} />
+                      <Text style={[hrStyles.gridDotLabel, { color: T.textDim }]}>{shortDay}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+
+              {/* Past reflections */}
+              {recentNotes.length > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={hrStyles.gridTitle}>PAST REFLECTIONS</Text>
+                  {recentNotes.map((n, idx) => (
+                    <View key={idx} style={hrStyles.noteRow}>
+                      <Text style={[hrStyles.noteDate, { color: T.textMid }]}>{new Date(n.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}:</Text>
+                      <Text style={[hrStyles.noteText, { color: T.textDim }]} numberOfLines={1}>"{n.note}"</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      </AnimatedReanimated.View>
+    </View>
+  );
+
+  return isCustomRoutine ? (
+    <Swipeable renderRightActions={renderRightActions} overshootRight={false}>
+      {content}
+    </Swipeable>
+  ) : content;
+}
+
+const hrStyles = StyleSheet.create({
+  deleteActionWrap: { justifyContent: 'center', alignItems: 'center', width: 70, marginBottom: 8, marginLeft: 4 },
+  rowWrapper: { borderRadius: 16, borderWidth: 1, marginBottom: 8, overflow: 'hidden' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  leftCol: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  emojiBox: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  emoji: { fontSize: 18 },
+  nameSub: { flex: 1, gap: 6 },
+  name: { fontSize: 14, fontFamily: 'Inter_700Bold', lineHeight: 18 },
+  streakPill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
+  streakText: { fontSize: 9, fontFamily: 'Inter_700Bold' },
+  commitWrap: { minWidth: 90, alignItems: 'flex-end', justifyContent: 'center' },
+  inlineCounter: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 10, padding: 2 },
+  inlineBtn: { width: 28, height: 28, borderRadius: 7, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  inlineVal: { fontSize: 13, fontFamily: 'Inter_700Bold', minWidth: 20, textAlign: 'center' },
+  expandContainer: { borderTopWidth: 1, padding: 14 },
+  tabBar: { flexDirection: 'row', gap: 16, marginBottom: 12, borderBottomWidth: 1 },
+  tabItem: { paddingBottom: 6, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  tabContent: { gap: 10 },
+  noteInputContainer: { marginTop: 4 },
+  noteInput: { borderWidth: 1, borderRadius: 12, padding: 12, fontSize: 14, fontFamily: 'Inter_500Medium', minHeight: 80, textAlignVertical: 'top' },
+  saveBtn: { borderRadius: 10, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+  saveBtnText: { color: '#FFF', fontSize: 13, fontFamily: 'Inter_700Bold' },
+  unlogBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  unlogBtnText: { fontSize: 11, fontFamily: 'Inter_700Bold' },
+  statsGrid: { flexDirection: 'row', gap: 8 },
+  statCard: { flex: 1, padding: 10, borderRadius: 10, borderWidth: 1 },
+  statVal: { fontSize: 16, fontFamily: 'Inter_700Bold' },
+  statLbl: { fontSize: 9, fontFamily: 'Inter_600SemiBold', marginTop: 1 },
+  gridTitle: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
+  gridDots: { flexDirection: 'row', gap: 5, flexWrap: 'wrap', marginTop: 4 },
+  gridDotWrap: { alignItems: 'center', gap: 3 },
+  gridDot: { width: 14, height: 14, borderRadius: 4, borderWidth: 1 },
+  gridDotLabel: { fontSize: 8, fontFamily: 'Inter_500Medium' },
+  noteRow: { flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 2 },
+  noteDate: { fontSize: 11, fontFamily: 'Inter_700Bold' },
+  noteText: { fontSize: 11, fontFamily: 'Inter_400Regular', flex: 1 },
+});
+
+// ─── Program Block ────────────────────────────────────────────────────────────
+function ProgramBlock({
+  programId, programTitle, programEmoji, programColor, weekLabel,
+  habits, today, weekDates,
+}: {
+  programId: string; programTitle: string; programEmoji: string; programColor: string;
+  weekLabel: string; habits: TrackedMetric[]; today: string; weekDates: string[];
+}) {
+  const colors = useColors();
+  const T = getThemeT(colors);
+  const { getLogForDate } = useApp();
+  const completedCount = habits.filter(m => isGood(m, getLogForDate(m.id, today)?.value)).length;
+  const allDone = completedCount === habits.length && habits.length > 0;
+
+  return (
+    <View style={[pbStyles.block, { borderLeftColor: programColor, backgroundColor: T.surface }]}>
+      <View style={pbStyles.header}>
+        <Text style={pbStyles.programEmoji}>{programEmoji}</Text>
+        <View style={pbStyles.headerMid}>
+          <Text style={[pbStyles.programTitle, { color: T.text }]}>{programTitle}</Text>
+          <Text style={[pbStyles.weekLabel, { color: programColor + 'BB' }]}>{weekLabel}</Text>
+        </View>
+        <View style={[pbStyles.progressPill, { backgroundColor: allDone ? programColor + '20' : T.cardRaise, borderColor: allDone ? programColor + '40' : T.border }]}>
+          <Text style={[pbStyles.progressText, { color: allDone ? programColor : T.textMid }]}>
+            {completedCount}/{habits.length}
+          </Text>
+        </View>
+      </View>
+
+      <View style={pbStyles.habitsBody}>
+        {habits.map((m) => (
+          <HabitRow
+            key={m.id}
+            metric={m}
+            today={today}
+            weekDates={weekDates}
+            color={programColor}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const pbStyles = StyleSheet.create({
+  block: { borderLeftWidth: 3, borderRadius: 16, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, marginBottom: 12, overflow: 'hidden' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14 },
+  programEmoji: { fontSize: 18 },
+  headerMid: { flex: 1, gap: 1 },
+  programTitle: { fontSize: 14, fontFamily: 'Inter_700Bold', letterSpacing: -0.2 },
+  weekLabel: { fontSize: 11, fontFamily: 'Inter_500Medium' },
+  progressPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1 },
+  progressText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  habitsBody: { paddingHorizontal: 14, paddingBottom: 6 },
+});
+
+// ─── Today Score Band ─────────────────────────────────────────────────────────
+function TodayScoreBand({
+  completed, total, dayScore, streak,
+}: {
+  completed: number; total: number; dayScore: number; streak: number;
+}) {
+  const colors = useColors();
+  const T = getThemeT(colors);
+  const pct = total > 0 ? completed / total : 0;
+  const barColor = pct >= 1 ? T.green : pct >= 0.5 ? T.violet : T.amber;
+  const animWidth = useSharedValue(0);
+
+  useEffect(() => {
+    animWidth.value = withTiming(pct, { duration: 700, easing: RAEasing.out(RAEasing.exp) });
+  }, [pct]);
+
+  const barStyle = useAnimatedStyle(() => ({
+    width: `${animWidth.value * 100}%` as any,
+    backgroundColor: barColor,
+  }));
+
+  return (
+    <View style={[tsbStyles.container, { backgroundColor: T.surface }]}>
+      <View style={tsbStyles.statCol}>
+        <Text style={[tsbStyles.statNum, { color: barColor }]}>{completed}<Text style={[tsbStyles.statDen, { color: T.textDim }]}>/{total}</Text></Text>
+        <Text style={[tsbStyles.statLabel, { color: T.textDim }]}>Habits Done</Text>
+      </View>
+      <View style={[tsbStyles.divider, { backgroundColor: T.border }]} />
+      <View style={tsbStyles.statCol}>
+        <Text style={[tsbStyles.statNum, { color: dayScore >= 80 ? T.green : dayScore >= 50 ? T.violet : T.textMid }]}>{dayScore}<Text style={[tsbStyles.statDen, { color: T.textDim }]}>%</Text></Text>
+        <Text style={[tsbStyles.statLabel, { color: T.textDim }]}>Day Score</Text>
+      </View>
+      <View style={[tsbStyles.divider, { backgroundColor: T.border }]} />
+      <View style={tsbStyles.statCol}>
+        <Text style={[tsbStyles.statNum, { color: streak >= 7 ? T.amber : streak >= 1 ? T.violet : T.textDim }]}>{streak}<Text style={[tsbStyles.statDen, { color: T.textDim }]}>d</Text></Text>
+        <Text style={[tsbStyles.statLabel, { color: T.textDim }]}>Streak</Text>
+      </View>
+      <View style={[tsbStyles.barTrack, { backgroundColor: T.border }]}>
+        <AnimatedReanimated.View style={[tsbStyles.barFill, barStyle]} />
+      </View>
+    </View>
+  );
+}
+
+const tsbStyles = StyleSheet.create({
+  container: { flexDirection: 'row', alignItems: 'center', borderRadius: 20, marginHorizontal: 16, overflow: 'hidden' },
+  statCol: { flex: 1, alignItems: 'center', paddingVertical: 18, paddingBottom: 22, gap: 3 },
+  statNum: { fontSize: 28, fontFamily: 'Inter_700Bold', letterSpacing: -1 },
+  statDen: { fontSize: 14, fontFamily: 'Inter_400Regular', letterSpacing: 0 },
+  statLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.2, textTransform: 'uppercase' },
+  divider: { width: 1, height: 36 },
+  barTrack: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 3 },
+  barFill: { height: 3, borderRadius: 3 },
+});
+
+// ─── Log Detail Modal ─────────────────────────────────────────────────────────
+function LogDetailModal({
+  metric, onSave, onClose, existingValue,
+}: {
+  metric: TrackedMetric | null; onSave: (value: number, ctx: HabitContext) => void;
+  onClose: () => void; existingValue?: number;
+}) {
+  const colors = useColors();
+  const T = getThemeT(colors);
+  const [counter, setCounter] = useState(existingValue ?? 0);
+  const [scaleVal, setScaleVal] = useState(existingValue ?? 5);
+  const [note, setNote] = useState('');
+  const [trigger, setTrigger] = useState<HabitContext['trigger']>();
+
+  useEffect(() => {
+    if (metric) {
+      setCounter(existingValue ?? 0);
+      setScaleVal(existingValue ?? 5);
+      setNote('');
+      setTrigger(undefined);
+    }
+  }, [metric, existingValue]);
+
+  if (!metric) return null;
+
+  const isReduce = metric.category === 'reduce';
+  const isCounter = metric.inputType === 'counter';
+  const isScale = metric.inputType === 'scale';
+  const color = isReduce ? T.red : metric.category === 'build' ? T.green : T.violet;
 
   const handleSave = () => {
     const ctx: HabitContext = {};
     if (trigger) ctx.trigger = trigger;
-    if (setting) ctx.setting = setting;
-    if (intensity > 0) ctx.intensity = intensity;
-    if (quality > 0) ctx.quality = quality;
     if (note.trim()) ctx.note = note.trim();
-    onSave(getValue(), ctx);
+    onSave(isCounter ? counter : scaleVal, ctx);
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={[csStyles.sheet, { paddingBottom: 60 }]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={[csStyles.sheetHandle, { backgroundColor: colors.border }]} />
-        <View style={csStyles.sheetHeader}>
-          <View style={[csStyles.sheetEmojiWrap, { backgroundColor: catColor + '15', borderColor: catColor + '30', borderWidth: 1 }]}>
-            <Text style={csStyles.sheetEmoji}>{metric.emoji ?? (isReduce ? '⚠️' : '✅')}</Text>
-          </View>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={[csStyles.sheetTitle, { color: colors.text }]}>{metric.name}</Text>
-            <Text style={[csStyles.sheetSub, { color: colors.textSecondary }]}>
-              {isReduce ? 'Log this slip-up with context' : 'Log your progress today'}
+    <Modal visible={!!metric} animationType="slide" presentationStyle="pageSheet">
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: T.bg }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <View style={ldmStyles.header}>
+          <TouchableOpacity onPress={onClose} activeOpacity={0.7} style={ldmStyles.closeBtn}>
+            <Ionicons name="chevron-down" size={22} color={T.textMid} />
+          </TouchableOpacity>
+          <Text style={ldmStyles.title}>{metric.name}</Text>
+          <View style={{ width: 44 }} />
+        </View>
+        <ScrollView contentContainerStyle={ldmStyles.body} keyboardShouldPersistTaps="handled">
+          <View style={ldmStyles.handle} />
+          <View style={ldmStyles.metricHead}>
+            <View style={[ldmStyles.emojiCircle, { backgroundColor: color + '18' }]}>
+              <Text style={{ fontSize: 32 }}>{metric.emoji ?? '•'}</Text>
+            </View>
+            <Text style={ldmStyles.metricLabel}>{isReduce ? 'Log slip-up count' : 'Log your progress'}</Text>
+            <Text style={[ldmStyles.metricCategory, { color: color + 'AA' }]}>
+              {isReduce ? 'REDUCE' : metric.category === 'build' ? 'BUILD' : 'MONITOR'}
             </Text>
           </View>
-        </View>
 
-        {/* Value Capture Card */}
-        <View style={[csStyles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[csStyles.sectionLabel, { color: colors.textSecondary }]}>TODAY'S VALUE</Text>
-          {isBool && (
-            <View style={csStyles.boolRow}>
-              <TouchableOpacity
-                onPress={() => { setBoolDone(false); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                style={[csStyles.boolBtn, {
-                  backgroundColor: !boolDone ? (isReduce ? colors.brand.success + '15' : colors.surfaceHigh) : colors.surface,
-                  borderColor: !boolDone ? (isReduce ? colors.brand.success : colors.border) : colors.border,
-                }]}
-                activeOpacity={0.7}
-              >
-                <Text style={{ fontSize: 22 }}>{isReduce ? '✅' : '🔲'}</Text>
-                <Text style={[csStyles.boolBtnText, { color: !boolDone ? (isReduce ? colors.brand.success : colors.text) : colors.textSecondary }]}>
-                  {isReduce ? 'Stayed Clean' : 'Not Done'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => { setBoolDone(true); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); }}
-                style={[csStyles.boolBtn, {
-                  backgroundColor: boolDone ? (isReduce ? colors.brand.danger + '15' : catColor + '15') : colors.surface,
-                  borderColor: boolDone ? (isReduce ? colors.brand.danger : catColor) : colors.border,
-                }]}
-                activeOpacity={0.7}
-              >
-                <Text style={{ fontSize: 22 }}>{isReduce ? '❌' : '✅'}</Text>
-                <Text style={[csStyles.boolBtnText, { color: boolDone ? (isReduce ? colors.brand.danger : catColor) : colors.textSecondary }]}>
-                  {isReduce ? 'Slipped Up' : 'Done!'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
           {isCounter && (
-            <View style={csStyles.counterRow}>
-              <TouchableOpacity
-                onPress={() => { if (counterVal > 0) { setCounterVal(c => c - 1); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } }}
-                style={[csStyles.counterBtn, { borderColor: colors.border, backgroundColor: colors.surfaceHigh }]}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="remove" size={22} color={colors.textSecondary} />
+            <View style={ldmStyles.counterBlock}>
+              <TouchableOpacity onPress={() => setCounter(v => Math.max(0, v - 1))} style={[ldmStyles.counterBtn, { borderColor: T.border }]} activeOpacity={0.7}>
+                <Ionicons name="remove" size={26} color={T.textMid} />
               </TouchableOpacity>
-              <View style={[csStyles.counterCenter, { borderColor: catColor + '40', backgroundColor: catColor + '10' }]}>
-                <Text style={[csStyles.counterNum, { color: catColor }]}>{counterVal}</Text>
-                {metric.unitLabel ? <Text style={[csStyles.counterUnit, { color: catColor + 'aa' }]}>{metric.unitLabel}</Text> : null}
+              <View style={[ldmStyles.counterVal, { borderColor: color + '40', backgroundColor: color + '10' }]}>
+                <Text style={[ldmStyles.counterNum, { color }]}>{counter}</Text>
+                {metric.unitLabel ? <Text style={[ldmStyles.counterUnit, { color: color + 'BB' }]}>{metric.unitLabel}</Text> : null}
               </View>
-              <TouchableOpacity
-                onPress={() => { setCounterVal(c => c + 1); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); }}
-                style={[csStyles.counterBtn, { borderColor: catColor, backgroundColor: catColor + '15' }]}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="add" size={22} color={catColor} />
+              <TouchableOpacity onPress={() => setCounter(v => v + 1)} style={[ldmStyles.counterBtn, { borderColor: color, backgroundColor: color + '15' }]} activeOpacity={0.7}>
+                <Ionicons name="add" size={26} color={color} />
               </TouchableOpacity>
             </View>
           )}
-          {metric.inputType === 'scale' && (
-            <View style={csStyles.scaleContainer}>
-              <View style={csStyles.scaleWrap}>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
-                  <TouchableOpacity
-                    key={n}
-                    onPress={() => { setScaleVal(n); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                    style={[csStyles.scaleDot, {
-                      backgroundColor: scaleVal >= n ? catColor : colors.border,
-                      width: scaleVal === n ? 24 : 16,
-                      height: scaleVal === n ? 24 : 16,
-                      borderRadius: scaleVal === n ? 12 : 8,
-                    }]}
-                    activeOpacity={0.7}
-                  />
+
+          {isScale && (
+            <View style={ldmStyles.scaleBlock}>
+              <Text style={[ldmStyles.scaleNum, { color }]}>{scaleVal}<Text style={ldmStyles.scaleDen}>/10</Text></Text>
+              <View style={ldmStyles.scaleDots}>
+                {[1,2,3,4,5,6,7,8,9,10].map(n => (
+                  <TouchableOpacity key={n} onPress={() => { setScaleVal(n); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} style={{ width: scaleVal === n ? 28 : 18, height: scaleVal === n ? 28 : 18, borderRadius: scaleVal === n ? 14 : 9, backgroundColor: scaleVal >= n ? color : T.border, alignSelf: 'center' }} activeOpacity={0.8} />
                 ))}
               </View>
-              <Text style={[csStyles.scaleNum, { color: catColor }]}>{scaleVal}/10</Text>
             </View>
           )}
-        </View>
 
-        {/* Reduction Slips Context */}
-        {isReduce && boolDone && (
-          <>
-            <View style={[csStyles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={[csStyles.sectionLabel, { color: colors.textSecondary }]}>WHAT TRIGGERED IT?</Text>
-              <View style={csStyles.chipGrid}>
-                {TRIGGERS.map(t => (
-                  <TouchableOpacity
-                    key={t.key}
-                    onPress={() => { setTrigger(t.key); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                    style={[csStyles.chip, {
-                      backgroundColor: trigger === t.key ? colors.brand.danger + '15' : colors.surfaceHigh,
-                      borderColor: trigger === t.key ? colors.brand.danger : colors.border,
-                    }]}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={csStyles.chipEmoji}>{t.emoji}</Text>
-                    <Text style={[csStyles.chipLabel, { color: trigger === t.key ? colors.brand.danger : colors.text }]}>{t.label}</Text>
+          {isReduce && (
+            <View style={ldmStyles.section}>
+              <Text style={ldmStyles.sectionLabel}>WHAT TRIGGERED IT?</Text>
+              <View style={ldmStyles.chips}>
+                {(['stress','boredom','social','habit','craving','other'] as const).map(t => (
+                  <TouchableOpacity key={t} onPress={() => setTrigger(t === trigger ? undefined : t)} style={[ldmStyles.chip, { backgroundColor: trigger === t ? T.red + '20' : T.card, borderColor: trigger === t ? T.red : T.border }]} activeOpacity={0.7}>
+                    <Text style={[ldmStyles.chipText, { color: trigger === t ? T.red : T.textMid }]}>{t}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
+          )}
 
-            <View style={[csStyles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={[csStyles.sectionLabel, { color: colors.textSecondary }]}>WHERE WERE YOU?</Text>
-              <View style={csStyles.chipGrid}>
-                {SETTINGS.map(s => (
-                  <TouchableOpacity
-                    key={s.key}
-                    onPress={() => { setSetting(s.key); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                    style={[csStyles.chip, {
-                      backgroundColor: setting === s.key ? colors.brand.danger + '15' : colors.surfaceHigh,
-                      borderColor: setting === s.key ? colors.brand.danger : colors.border,
-                    }]}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={csStyles.chipEmoji}>{s.emoji}</Text>
-                    <Text style={[csStyles.chipLabel, { color: setting === s.key ? colors.brand.danger : colors.text }]}>{s.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={[csStyles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <IntensityDots value={intensity} onChange={setIntensity} color={colors.brand.danger} label="Urge Strength" />
-            </View>
-          </>
-        )}
-
-        {/* Build Quality Context */}
-        {!isReduce && (
-          <View style={[csStyles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <IntensityDots value={quality} onChange={setQuality} color={catColor} label="Session Quality" />
+          <View style={ldmStyles.section}>
+            <Text style={ldmStyles.sectionLabel}>NOTE / REFLECTION</Text>
+            <TextInput
+              value={note} onChangeText={setNote}
+              placeholder="Felt tired? Environment change?"
+              placeholderTextColor={T.textDim}
+              style={[ldmStyles.noteInput]}
+              multiline
+            />
           </View>
-        )}
 
-        {/* Notes (text input) */}
-        <View style={[csStyles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[csStyles.sectionLabel, { color: colors.textSecondary }]}>NOTES & REFLECTION (optional)</Text>
-          <TextInput
-            value={note}
-            onChangeText={setNote}
-            placeholder={isReduce ? 'What was on your mind? What will you do differently tomorrow?' : 'Any wins? How did you design your environment?'}
-            placeholderTextColor={colors.textDim}
-            multiline
-            style={[csStyles.noteInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceHigh }]}
+          <HoldToLogCompact
+            color={color}
+            completed={false}
+            onComplete={handleSave}
+            size={56}
           />
-        </View>
-
-        {/* Save Button */}
-        <TouchableOpacity onPress={handleSave} activeOpacity={0.88}>
-          <LinearGradient
-            colors={isReduce ? [colors.brand.danger, colors.brand.dangerLight] : colors.gradients.primaryShort}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={csStyles.saveBtnGradient}
-          >
-            <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
-            <Text style={csStyles.saveBtnText}>Save Log</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
-const csStyles = StyleSheet.create({
-  sheet: { padding: 20, gap: 14 },
-  sheetHandle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 6 },
-  sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 4 },
-  sheetEmojiWrap: { width: 52, height: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  sheetEmoji: { fontSize: 26 },
-  sheetTitle: { fontSize: 18, fontFamily: 'Inter_700Bold' },
-  sheetSub: { fontSize: 12, fontFamily: 'Inter_400Regular' },
-  section: { borderWidth: 1, borderRadius: 16, padding: 16, gap: 12 },
-  sectionLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 2 },
-  boolRow: { flexDirection: 'row', gap: 10 },
-  boolBtn: { flex: 1, borderWidth: 1.5, borderRadius: 14, padding: 16, alignItems: 'center', gap: 6 },
-  boolBtnText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
-  counterRow: { flexDirection: 'row', alignItems: 'center', gap: 14, justifyContent: 'center' },
-  counterBtn: { width: 52, height: 52, borderRadius: 26, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  counterCenter: { minWidth: 100, height: 52, borderRadius: 14, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: 18 },
-  counterNum: { fontSize: 28, fontFamily: 'Inter_700Bold' },
-  counterUnit: { fontSize: 13, fontFamily: 'Inter_500Medium', alignSelf: 'flex-end', paddingBottom: 4 },
-  scaleContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  scaleWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  scaleDot: { alignSelf: 'center' },
-  scaleNum: { fontSize: 14, fontFamily: 'Inter_700Bold' },
-  chipGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5 },
-  chipEmoji: { fontSize: 15 },
-  chipLabel: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
-  dotRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  dotLabel: { fontSize: 13, fontFamily: 'Inter_600SemiBold', width: 100 },
-  dots: { flexDirection: 'row', gap: 8, flex: 1 },
-  dot: { width: 18, height: 18, borderRadius: 9 },
-  dotNum: { fontSize: 13, fontFamily: 'Inter_700Bold', width: 28, textAlign: 'right' },
-  noteInput: { borderWidth: 1, borderRadius: 12, padding: 12, fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20, minHeight: 72, textAlignVertical: 'top' },
-  saveBtnGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 18, borderRadius: 16, marginTop: 6 },
-  saveBtnText: { fontSize: 16, fontFamily: 'Inter_700Bold', color: '#fff' },
-});
-
-// ─── Habit Card (Grid Item) ───────────────────────────────────────────────────
-function HabitCard({ metric, today, isProgram, programColor, colors }: {
-  metric: TrackedMetric; today: string; isProgram: boolean; programColor?: string; colors: any;
-}) {
-  const { logMetric, getLogForDate, getLogsForMetric, getMetricStreak, getMetricConsistency, deleteMetric } = useApp();
-  const [showSheet, setShowSheet] = useState(false);
-  const scale = useSharedValue(1);
-
-  const log = getLogForDate(metric.id, today);
-  const history = getLogsForMetric(metric.id, 14);
-  const streak = getMetricStreak(metric.id);
-  const consistency = getMetricConsistency(metric.id, 30);
-
-  const isReduce = metric.category === 'reduce';
-  const isBuild = metric.category === 'build';
-  const done = isGood(metric, log?.value);
-  const hasContext = !!(log?.context && Object.keys(log.context).length > 0);
-
-  const accentColor = isProgram && programColor
-    ? programColor
-    : isReduce ? colors.brand.danger : isBuild ? colors.brand.success : colors.brand.primary;
-
-  const sparkline = getMiniSparkline(history);
-
-  const handleSave = (value: number, ctx: HabitContext) => {
-    logMetric(metric.id, today, value, ctx.note, ctx);
-    setShowSheet(false);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  };
-
-  const cardBg = done
-    ? accentColor + '10'
-    : isReduce && log?.value && log.value > 0 ? colors.brand.danger + '10' : colors.surface;
-  const cardBorder = done
-    ? accentColor + '50'
-    : isReduce && log?.value && log.value > 0 ? colors.brand.danger + '40' : colors.border;
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <>
-      <Pressable
-        onPressIn={() => { scale.value = withSpring(0.97); }}
-        onPressOut={() => { scale.value = withSpring(1); }}
-        onPress={() => { setShowSheet(true); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); }}
-        style={{ marginBottom: 10 }}
-      >
-        <AnimatedReanimated.View
-          style={[
-            hcStyles.card,
-            {
-              backgroundColor: cardBg,
-              borderColor: cardBorder,
-              borderWidth: isProgram ? 1.5 : 1,
-              borderRadius: 18,
-            },
-            animatedStyle
-          ]}
-        >
-          <View style={hcStyles.top}>
-            {/* Streak ring + emoji */}
-            <View style={hcStyles.iconArea}>
-              <View style={[hcStyles.emojiRing, {
-                borderColor: streak >= 3 ? accentColor : 'transparent',
-                borderWidth: streak >= 3 ? 2 : 0,
-                backgroundColor: accentColor + '15',
-              }]}>
-                <Text style={hcStyles.emoji}>{metric.emoji ?? (isReduce ? '⚠️' : '✅')}</Text>
-              </View>
-              {streak >= 1 && (
-                <View style={[hcStyles.streakPill, { backgroundColor: accentColor }]}>
-                  <Text style={hcStyles.streakPillText}>{streak}🔥</Text>
-                </View>
-              )}
-            </View>
-
-            {/* Info */}
-            <View style={{ flex: 1, gap: 3 }}>
-              <View style={hcStyles.nameRow}>
-                <Text style={[hcStyles.name, { color: colors.text }]} numberOfLines={1}>{metric.name}</Text>
-                {isProgram && (
-                  <View style={[hcStyles.protocolBadge, { backgroundColor: accentColor + '20' }]}>
-                    <Text style={[hcStyles.protocolBadgeText, { color: accentColor }]}>Protocol</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={[hcStyles.spark, { color: accentColor }]}>{sparkline}</Text>
-              <Text style={[hcStyles.consistency, { color: colors.textSecondary }]}>
-                {consistency}% consistent · {streak > 0 ? `${streak}d streak` : 'Start today'}
-              </Text>
-            </View>
-
-            {/* Status Button representation */}
-            <View style={[hcStyles.statusDot, {
-              backgroundColor: done ? accentColor : (isReduce && log?.value ? colors.brand.danger : colors.border + '80'),
-            }]}>
-              <Ionicons
-                name={done ? 'checkmark' : (isReduce && log?.value ? 'close' : 'add')}
-                size={14}
-                color={done || (isReduce && log?.value) ? '#fff' : colors.textSecondary}
-              />
-            </View>
-          </View>
-
-          {/* Context Preview block */}
-          {log && hasContext && (
-            <View style={[hcStyles.contextPreview, { backgroundColor: accentColor + '10', borderColor: accentColor + '20' }]}>
-              {log.context?.trigger && (
-                <View style={[hcStyles.ctxChip, { backgroundColor: colors.surfaceHigh }]}>
-                  <Text style={[hcStyles.ctxChipText, { color: colors.text }]}>{TRIGGERS.find(t => t.key === log.context!.trigger)?.emoji} {log.context.trigger}</Text>
-                </View>
-              )}
-              {log.context?.setting && (
-                <View style={[hcStyles.ctxChip, { backgroundColor: colors.surfaceHigh }]}>
-                  <Text style={[hcStyles.ctxChipText, { color: colors.text }]}>{SETTINGS.find(s => s.key === log.context!.setting)?.emoji} {log.context.setting}</Text>
-                </View>
-              )}
-              {(log.context?.intensity ?? 0) > 0 && (
-                <View style={[hcStyles.ctxChip, { backgroundColor: colors.surfaceHigh }]}>
-                  <Text style={[hcStyles.ctxChipText, { color: colors.text }]}>⚡ Intensity {log.context?.intensity}/5</Text>
-                </View>
-              )}
-              {(log.context?.quality ?? 0) > 0 && (
-                <View style={[hcStyles.ctxChip, { backgroundColor: colors.surfaceHigh }]}>
-                  <Text style={[hcStyles.ctxChipText, { color: colors.text }]}>⭐ Quality {log.context?.quality}/5</Text>
-                </View>
-              )}
-              {log.context?.note && (
-                <Text style={[hcStyles.ctxNote, { color: colors.textSecondary }]} numberOfLines={1}>
-                  "{log.context.note}"
-                </Text>
-              )}
-            </View>
-          )}
-
-          {/* Logged simple row */}
-          {log && !hasContext && (
-            <View style={[hcStyles.loggedSimple, { borderTopColor: cardBorder }]}>
-              <Text style={[hcStyles.loggedSimpleText, { color: accentColor }]}>
-                {metric.inputType === 'boolean'
-                  ? (done ? '✓ Logged' : '✗ Slipped')
-                  : metric.inputType === 'counter'
-                    ? `${log.value}${metric.unitLabel ? ' ' + metric.unitLabel : ''} logged`
-                    : `${log.value}/10 logged`}
-              </Text>
-              <TouchableOpacity onPress={() => setShowSheet(true)} activeOpacity={0.7}>
-                <Text style={[hcStyles.addContextText, { color: accentColor }]}>+ Add context</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </AnimatedReanimated.View>
-      </Pressable>
-
-      <Modal visible={showSheet} animationType="slide" presentationStyle="pageSheet">
-        <View style={{ flex: 1, backgroundColor: colors.background }}>
-          <View style={[sheetHeaderStyles.header, { borderBottomColor: colors.border }]}>
-            <TouchableOpacity onPress={() => setShowSheet(false)} style={sheetHeaderStyles.cancelBtn} activeOpacity={0.7}>
-              <Text style={[sheetHeaderStyles.cancelText, { color: colors.textSecondary }]}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => {
-                Alert.alert('Delete Tracker?', `Remove "${metric.name}" and all its history?`, [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Delete', style: 'destructive', onPress: () => { deleteMetric(metric.id); setShowSheet(false); } },
-                ]);
-              }}
-              style={sheetHeaderStyles.deleteBtn}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="trash-outline" size={16} color={colors.brand.danger} />
-            </TouchableOpacity>
-          </View>
-          <ContextSheet metric={metric} existingLog={log} onSave={handleSave} onCancel={() => setShowSheet(false)} colors={colors} />
-        </View>
-      </Modal>
-    </>
-  );
-}
-
-const hcStyles = StyleSheet.create({
-  card: { padding: 14, gap: 10, borderWidth: 1 },
-  top: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  iconArea: { alignItems: 'center', gap: 4 },
-  emojiRing: { width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  emoji: { fontSize: 22 },
-  streakPill: { paddingHorizontal: 5, paddingVertical: 2, borderRadius: 8 },
-  streakPillText: { fontSize: 9, fontFamily: 'Inter_700Bold', color: '#fff' },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  name: { fontSize: 15, fontFamily: 'Inter_700Bold', flex: 1 },
-  protocolBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
-  protocolBadgeText: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 0.5 },
-  spark: { fontSize: 11, fontFamily: 'Inter_400Regular', letterSpacing: 1.5 },
-  consistency: { fontSize: 11, fontFamily: 'Inter_400Regular' },
-  statusDot: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  contextPreview: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, padding: 10, borderRadius: 12, borderWidth: 1 },
-  ctxChip: { borderRadius: 20, paddingHorizontal: 8, paddingVertical: 4 },
-  ctxChipText: { fontSize: 11, fontFamily: 'Inter_500Medium' },
-  ctxNote: { fontSize: 11, fontFamily: 'Inter_400Regular', fontStyle: 'italic', width: '100%' },
-  loggedSimple: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, paddingTop: 8 },
-  loggedSimpleText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
-  addContextText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
-});
-
-const sheetHeaderStyles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1 },
-  cancelBtn: { paddingVertical: 4 },
-  cancelText: { fontSize: 15, fontFamily: 'Inter_500Medium' },
-  deleteBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ef444415' },
-});
-
-// ─── Templates Constants ──────────────────────────────────────────────────────
-const QUICK_TEMPLATES = [
+// ─── Add Tracker Templates ───────────────────────────────────────────────────
+const TEMPLATES = [
   { emoji: '🏋️', name: 'Gym Session', category: 'build' as const, inputType: 'boolean' as const, unitLabel: '' },
   { emoji: '💧', name: 'Water Intake', category: 'build' as const, inputType: 'counter' as const, unitLabel: 'glasses' },
   { emoji: '📖', name: 'Reading', category: 'build' as const, inputType: 'counter' as const, unitLabel: 'pages' },
-  { emoji: '🚶', name: 'Steps Goal', category: 'build' as const, inputType: 'counter' as const, unitLabel: 'K steps' },
+  { emoji: '🧘', name: 'Meditation', category: 'build' as const, inputType: 'boolean' as const, unitLabel: '' },
+  { emoji: '🚶', name: 'Steps', category: 'build' as const, inputType: 'counter' as const, unitLabel: 'K steps' },
   { emoji: '🍭', name: 'Sugar & Junk', category: 'reduce' as const, inputType: 'boolean' as const, unitLabel: '' },
   { emoji: '🚬', name: 'Cigarettes', category: 'reduce' as const, inputType: 'counter' as const, unitLabel: 'cigs' },
   { emoji: '🍺', name: 'Alcohol', category: 'reduce' as const, inputType: 'counter' as const, unitLabel: 'drinks' },
   { emoji: '📱', name: 'Screen Time', category: 'reduce' as const, inputType: 'counter' as const, unitLabel: 'min' },
-  { emoji: '⚡', name: 'Energy Level', category: 'neutral' as const, inputType: 'scale' as const, unitLabel: '/10' },
+  { emoji: '⚡', name: 'Energy', category: 'neutral' as const, inputType: 'scale' as const, unitLabel: '/10' },
   { emoji: '😴', name: 'Sleep Quality', category: 'neutral' as const, inputType: 'scale' as const, unitLabel: '/10' },
+  { emoji: '🧠', name: 'Deep Work', category: 'build' as const, inputType: 'counter' as const, unitLabel: 'min' },
 ];
 
-// ─── Main Tracker Component ───────────────────────────────────────────────────
-export default function TrackScreen() {
+// ─── Add Tracker Modal ────────────────────────────────────────────────────────
+function AddTrackerModal({ visible, onClose, onAdd }: { visible: boolean; onClose: () => void; onAdd: (m: any) => void; }) {
   const colors = useColors();
+  const T = getThemeT(colors);
+  const [step, setStep] = useState<'pick' | 'config'>('pick');
+  const [name, setName] = useState('');
+  const [emoji, setEmoji] = useState('');
+  const [category, setCategory] = useState<'build' | 'reduce' | 'neutral'>('build');
+  const [inputType, setInputType] = useState<'boolean' | 'counter' | 'scale'>('boolean');
+  const [unit, setUnit] = useState('');
+  const reset = () => { setName(''); setEmoji(''); setUnit(''); setCategory('build'); setInputType('boolean'); setStep('pick'); };
+
+  const catColor = category === 'build' ? T.green : category === 'reduce' ? T.red : T.violet;
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: T.bg }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <View style={atmStyles.header}>
+          {step === 'config'
+            ? <TouchableOpacity onPress={() => setStep('pick')} style={atmStyles.navBtn} activeOpacity={0.7}><Ionicons name="chevron-back" size={22} color={T.text} /></TouchableOpacity>
+            : <View style={atmStyles.navBtn} />}
+          <Text style={atmStyles.title}>{step === 'pick' ? 'Add Tracker' : 'Configure'}</Text>
+          <TouchableOpacity onPress={() => { reset(); onClose(); }} style={atmStyles.navBtn} activeOpacity={0.7}><Ionicons name="close" size={22} color={T.textMid} /></TouchableOpacity>
+        </View>
+
+        {step === 'pick' ? (
+          <ScrollView contentContainerStyle={atmStyles.body} keyboardShouldPersistTaps="handled">
+            <Text style={atmStyles.sectionLabel}>QUICK START</Text>
+            <View style={atmStyles.templateGrid}>
+              {TEMPLATES.map((t, i) => {
+                const cc = t.category === 'build' ? T.green : t.category === 'reduce' ? T.red : T.violet;
+                return (
+                  <TouchableOpacity key={i} onPress={() => { setName(t.name); setCategory(t.category); setInputType(t.inputType); setUnit(t.unitLabel); setEmoji(t.emoji); setStep('config'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} style={[atmStyles.templateCard, { borderColor: cc + '30' }]} activeOpacity={0.8}>
+                    <View style={[atmStyles.templateEmojiBox, { backgroundColor: cc + '15' }]}><Text style={{ fontSize: 22 }}>{t.emoji}</Text></View>
+                    <Text style={atmStyles.templateName}>{t.name}</Text>
+                    <View style={[atmStyles.catDot, { backgroundColor: cc }]} />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={atmStyles.sep}><View style={atmStyles.sepLine} /><Text style={atmStyles.sepText}>or from scratch</Text><View style={atmStyles.sepLine} /></View>
+            <TouchableOpacity onPress={() => setStep('config')} style={[atmStyles.scratchBtn, { borderColor: T.violet + '40' }]} activeOpacity={0.8}>
+              <Ionicons name="construct-outline" size={16} color={T.violet} />
+              <Text style={[atmStyles.scratchBtnText, { color: T.violet }]}>Build Custom Tracker</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        ) : (
+          <ScrollView contentContainerStyle={atmStyles.body} keyboardShouldPersistTaps="handled">
+            <Text style={atmStyles.sectionLabel}>NAME</Text>
+            <TextInput value={name} onChangeText={setName} placeholder="e.g. Morning Run" placeholderTextColor={T.textDim} autoFocus style={atmStyles.input} selectionColor={T.violet} />
+            <Text style={atmStyles.sectionLabel}>EMOJI</Text>
+            <TextInput value={emoji} onChangeText={setEmoji} placeholder="🏃" placeholderTextColor={T.textDim} style={atmStyles.input} selectionColor={T.violet} />
+            <Text style={atmStyles.sectionLabel}>CATEGORY</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {([{ k: 'build', l: 'Build', c: T.green }, { k: 'reduce', l: 'Reduce', c: T.red }, { k: 'neutral', l: 'Monitor', c: T.violet }] as const).map(cat => (
+                <TouchableOpacity key={cat.k} onPress={() => { setCategory(cat.k); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} style={[atmStyles.catBtn, { borderColor: category === cat.k ? cat.c : T.border, backgroundColor: category === cat.k ? cat.c + '12' : T.card }]} activeOpacity={0.8}>
+                  <View style={[atmStyles.catDotLg, { backgroundColor: cat.c, opacity: category === cat.k ? 1 : 0.3 }]} />
+                  <Text style={[atmStyles.catBtnLabel, { color: category === cat.k ? cat.c : T.textMid }]}>{cat.l}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={atmStyles.sectionLabel}>HOW TO LOG</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {([{ k: 'boolean', l: 'Check-off (Yes/No)' }, { k: 'counter', l: 'Tally Count' }, { k: 'scale', l: '1-10 Rating' }] as const).map(type => (
+                <TouchableOpacity key={type.k} onPress={() => { setInputType(type.k); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} style={[atmStyles.typeBtn, { borderColor: inputType === type.k ? catColor : T.border, backgroundColor: inputType === type.k ? catColor + '12' : T.card }]} activeOpacity={0.8}>
+                  <Text style={[atmStyles.typeBtnLabel, { color: inputType === type.k ? catColor : T.textMid }]}>{type.l}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {inputType !== 'boolean' && (
+              <>
+                <Text style={atmStyles.sectionLabel}>UNIT LABEL</Text>
+                <TextInput value={unit} onChangeText={setUnit} placeholder="glasses, km, min..." placeholderTextColor={T.textDim} style={atmStyles.input} selectionColor={T.violet} />
+              </>
+            )}
+            <View style={{ marginTop: 8 }}>
+              <HoldToLogCompact
+                color={catColor}
+                completed={false}
+                onComplete={async () => {
+                  if (!name.trim()) { Alert.alert('Name required'); return; }
+                  await onAdd({ name: name.trim(), category, inputType, unitLabel: unit.trim(), emoji: emoji || undefined, isSensitive: false, scoreWeight: 5 });
+                  reset(); onClose();
+                }}
+                size={56}
+              />
+            </View>
+          </ScrollView>
+        )}
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const atmStyles = StyleSheet.create({
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingTop: 18, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: T.border },
+  navBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 16, fontFamily: 'Inter_700Bold', color: T.text },
+  body: { padding: 20, paddingBottom: 60, gap: 12 },
+  sectionLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', color: T.textDim, letterSpacing: 2 },
+  templateGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  templateCard: { width: (SW - 56) / 3, backgroundColor: T.surface, borderRadius: 14, borderWidth: 1, padding: 12, alignItems: 'flex-start', gap: 6 },
+  templateEmojiBox: { width: 36, height: 36, borderRadius: 10, backgroundColor: T.surface, alignItems: 'center', justifyContent: 'center' },
+  templateName: { fontSize: 11, fontFamily: 'Inter_600SemiBold', color: T.text, lineHeight: 15 },
+  catDot: { width: 6, height: 6, borderRadius: 3 },
+  sep: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  sepLine: { flex: 1, height: 1, backgroundColor: T.border },
+  sepText: { fontSize: 11, fontFamily: 'Inter_500Medium', color: T.textDim },
+  scratchBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderWidth: 1, borderRadius: 14, paddingVertical: 16 },
+  scratchBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  input: { backgroundColor: T.surface, borderWidth: 1, borderColor: T.border, borderRadius: 12, padding: 14, fontSize: 15, fontFamily: 'Inter_400Regular', color: T.text },
+  catBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingVertical: 14 },
+  catDotLg: { width: 8, height: 8, borderRadius: 4 },
+  catBtnLabel: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  typeBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderRadius: 12, paddingVertical: 14 },
+  typeBtnLabel: { fontSize: 11, fontFamily: 'Inter_600SemiBold', textAlign: 'center' },
+});
+
+const ldmStyles = StyleSheet.create({
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 18, paddingBottom: 12 },
+  closeBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 16, fontFamily: 'Inter_700Bold', color: T.text },
+  body: { padding: 20, gap: 20, paddingBottom: 60 },
+  handle: { width: 36, height: 4, backgroundColor: T.borderMid, borderRadius: 2, alignSelf: 'center', marginBottom: 4 },
+  metricHead: { alignItems: 'center', gap: 8 },
+  emojiCircle: { width: 72, height: 72, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  metricLabel: { fontSize: 18, fontFamily: 'Inter_700Bold', color: T.text, textAlign: 'center' },
+  metricCategory: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 2 },
+  counterBlock: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20 },
+  counterBtn: { width: 56, height: 56, borderRadius: 28, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  counterVal: { minWidth: 120, height: 56, borderRadius: 16, borderWidth: 1.5, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 20 },
+  counterNum: { fontSize: 34, fontFamily: 'Inter_700Bold' },
+  counterUnit: { fontSize: 13, fontFamily: 'Inter_500Medium', alignSelf: 'flex-end', paddingBottom: 5 },
+  scaleBlock: { alignItems: 'center', gap: 14 },
+  scaleNum: { fontSize: 52, fontFamily: 'Inter_700Bold', letterSpacing: -3 },
+  scaleDen: { fontSize: 22, fontFamily: 'Inter_400Regular', color: T.textDim, letterSpacing: 0 },
+  scaleDots: { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  section: { gap: 10 },
+  sectionLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', color: T.textDim, letterSpacing: 2 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
+  chipText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  noteInput: { backgroundColor: T.surface, borderRadius: 14, padding: 14, fontSize: 14, fontFamily: 'Inter_400Regular', color: T.text, minHeight: 72, textAlignVertical: 'top', borderWidth: 1, borderColor: T.border },
+});
+
+// ─── MAIN SCREEN ──────────────────────────────────────────────────────────────
+export default function TrackScreen() {
   const insets = useSafeAreaInsets();
   const {
-    metrics, getLogForDate, addCustomMetric, dayScore, journalEntries,
-    profile, availablePrograms,
+    metrics, getLogForDate, getLogsForDate, addCustomMetric, dayScore,
+    profile, availablePrograms, currentStreak, logMetric, getProgramProgress,
   } = useApp();
-  
-  const today = new Date().toISOString().split('T')[0];
+  const colors = useColors();
+  const T = getThemeT(colors);
+
+  const today = getLocalDateString();
+  const weekDates = getThisWeekDates();
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
 
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [modalStep, setModalStep] = useState<'template' | 'configure'>('template');
-  const [newName, setNewName] = useState('');
-  const [newEmoji, setNewEmoji] = useState('');
-  const [newCategory, setNewCategory] = useState<'build' | 'reduce' | 'neutral'>('build');
-  const [newInputType, setNewInputType] = useState<'boolean' | 'counter' | 'scale'>('boolean');
-  const [newUnit, setNewUnit] = useState('');
-  const [activeSection, setActiveSection] = useState<'all' | 'protocol' | 'routines'>('all');
+  const [showAdd, setShowAdd] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'routines' | string>('all');
 
-  const hasJournal = journalEntries.some(e => e.date === today);
-
-  const programColorMap: Record<string, string> = {};
-  for (const programId of profile.activeProgramIds) {
-    const prog = availablePrograms.find(p => p.id === programId);
-    if (!prog) continue;
-    metrics.forEach(m => {
-      if ((m as any).programId === programId) {
-        programColorMap[m.id] = prog.color;
-      }
-    });
-  }
-  
   const protocolMetrics = metrics.filter(m => (m as any).programId != null);
   const routineMetrics = metrics.filter(m => (m as any).programId == null);
 
-  const completedToday = metrics.filter(m => {
-    const log = getLogForDate(m.id, today);
-    return isGood(m, log?.value);
-  }).length;
-  const totalMetrics = metrics.length;
-  const ringPct = totalMetrics > 0 ? completedToday / totalMetrics : 0;
+  const completedToday = metrics.filter(m => isGood(m, getLogForDate(m.id, today)?.value)).length;
 
-  const ringColor = ringPct >= 1 ? colors.brand.success : ringPct >= 0.5 ? colors.brand.primary : colors.brand.warning;
+  // Filter program groups
+  const programGroups = useMemo(() => {
+    const groups: { programId: string; metrics: TrackedMetric[] }[] = [];
+    for (const programId of profile.activeProgramIds) {
+      const prog = availablePrograms.find(p => p.id === programId);
+      if (!prog) continue;
+      const pmx = protocolMetrics.filter(m => (m as any).programId === programId);
+      if (pmx.length === 0) continue;
+      groups.push({ programId, metrics: pmx });
+    }
+    return groups;
+  }, [profile.activeProgramIds, availablePrograms, protocolMetrics]);
+
+  // Weekly bar chart calculation (matches index.tsx dashboard view exactly)
+  const currentWeekDays = useMemo(() => {
+    const [y, m, d] = today.split('-').map(Number);
+    const localDate = new Date(y, m - 1, d);
+    const day = localDate.getDay();
+    const diffToMonday = localDate.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(y, m - 1, diffToMonday);
+
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const temp = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
+      const ty = temp.getFullYear();
+      const tm = String(temp.getMonth() + 1).padStart(2, '0');
+      const td = String(temp.getDate()).padStart(2, '0');
+      const dateStr = `${ty}-${tm}-${td}`;
+
+      const isFuture = dateStr > today;
+      const logs = getLogsForDate ? getLogsForDate(dateStr) : [];
+      let score: number | null = null;
+      if (logs.length > 0) {
+        const completed = logs.filter(l => {
+          const metric = metrics.find(m => m.id === l.metricId);
+          if (!metric) return false;
+          if (metric.category === 'build') return l.value > 0;
+          if (metric.category === 'reduce') return l.value === 0;
+          return true;
+        }).length;
+        score = Math.round((completed / Math.max(logs.length, 1)) * 100);
+      }
+      days.push({ date: dateStr, score, isToday: dateStr === today, isFuture });
+    }
+    return days;
+  }, [metrics, getLogsForDate, today]);
+
+  // Tab switch logic to trigger bar reanimation
+  const [focusKey, setFocusKey] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      setFocusKey(prev => prev + 1);
+    }, [])
+  );
+
   const now = new Date();
-  const dateLabel = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 
-  const resetModal = () => {
-    setNewName(''); setNewEmoji(''); setNewUnit('');
-    setNewCategory('build'); setNewInputType('boolean');
-    setModalStep('template');
-  };
-  
-  const openModal = () => { resetModal(); setShowAddModal(true); };
-  const closeModal = () => { resetModal(); setShowAddModal(false); };
+  // Filter lists based on selectedProgramFilter
+  const showAll = selectedFilter === 'all';
+  const showRoutines = selectedFilter === 'routines' || showAll;
 
-  const applyTemplate = (t: typeof QUICK_TEMPLATES[0]) => {
-    setNewName(t.name); setNewCategory(t.category);
-    setNewInputType(t.inputType); setNewUnit(t.unitLabel);
-    setNewEmoji(t.emoji); setModalStep('configure');
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
-
-  const handleAddMetric = async () => {
-    if (!newName.trim()) { Alert.alert('Name required', 'Give your tracker a name.'); return; }
-    await addCustomMetric({
-      name: newName.trim(), category: newCategory, inputType: newInputType,
-      unitLabel: newUnit.trim(), emoji: newEmoji || undefined,
-      isSensitive: false, scoreWeight: 5,
-    });
-    closeModal();
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  };
-
-  const displayMetrics = activeSection === 'protocol'
-    ? protocolMetrics
-    : activeSection === 'routines'
-      ? routineMetrics
-      : metrics;
+  const filteredGroups = useMemo(() => {
+    if (selectedFilter === 'routines') return [];
+    if (selectedFilter === 'all') return programGroups;
+    return programGroups.filter(g => g.programId === selectedFilter);
+  }, [selectedFilter, programGroups]);
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
-      {/* Decorative radial gradient blob */}
-      <View style={styles.blurBlobContainer}>
-        <LinearGradient
-          colors={[colors.brand.primaryGlow, 'transparent']}
-          style={styles.blurBlob}
-        />
+    <View style={[mainStyle.root, { backgroundColor: colors.background }]}>
+      <View style={mainStyle.ambientGlow} pointerEvents="none">
+        <LinearGradient colors={[colors.brand.primaryGlow, 'transparent']} style={{ flex: 1 }} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} />
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.content, {
-          paddingTop: topPadding + 12,
-          paddingBottom: Platform.OS === 'web' ? 120 : 110,
-        }]}
+        contentContainerStyle={[mainStyle.scroll, { paddingTop: topPadding + 6, paddingBottom: Platform.OS === 'web' ? 140 : 130 }]}
         showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
       >
-        {/* Title bar */}
-        <View style={styles.titleRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.title, { color: colors.text }]}>Trackers</Text>
-            <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>{dateLabel}</Text>
+        {/* ── Page header ── */}
+        <View style={mainStyle.pageHeader}>
+          <View>
+            <Text style={mainStyle.pageDateLabel}>{dateStr}</Text>
+            <Text style={mainStyle.pageTitle}>Protocol Board</Text>
           </View>
-          <TouchableOpacity onPress={openModal} activeOpacity={0.88}>
-            <LinearGradient
-              colors={colors.gradients.primaryShort}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.addBtnGradient}
-            >
-              <Ionicons name="add" size={24} color="#fff" />
-            </LinearGradient>
+          <TouchableOpacity onPress={() => setShowAdd(true)} style={mainStyle.headerAddBtn} activeOpacity={0.7}>
+            <Ionicons name="add" size={16} color={T.text} />
+            <Text style={mainStyle.headerAddBtnText}>New</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Hero status card */}
-        <GlassCard intensity={30}>
-          <View style={styles.heroCardContent}>
-            <CircularRing pct={ringPct} size={86} strokeW={7} color={ringColor}>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={[styles.ringNum, { color: ringColor }]}>{completedToday}</Text>
-                <Text style={[styles.ringDen, { color: colors.textSecondary }]}>/{totalMetrics}</Text>
-              </View>
-            </CircularRing>
+        {/* ── Zone 1: Today Score Band ── */}
+        <TodayScoreBand
+          completed={completedToday}
+          total={metrics.length}
+          dayScore={dayScore}
+          streak={currentStreak}
+        />
 
-            <View style={{ flex: 1, gap: 8 }}>
-              <Text style={[styles.heroLabel, { color: colors.text }]}>
-                {completedToday === totalMetrics && totalMetrics > 0
-                  ? '🏆 Perfect day completed!'
-                  : completedToday > 0
-                    ? `${totalMetrics - completedToday} left to complete`
-                    : 'Start logging habits'}
-              </Text>
-              
-              <View style={styles.heroStatRow}>
-                <View style={styles.heroStat}>
-                  <Ionicons name="trophy-outline" size={13} color={dayScore >= 80 ? colors.brand.success : colors.textSecondary} />
-                  <Text style={[styles.heroStatText, { color: dayScore >= 80 ? colors.brand.success : colors.textSecondary }]}>
-                    {dayScore}% Score
-                  </Text>
-                </View>
-                <View style={styles.heroStat}>
-                  <Ionicons name={hasJournal ? 'book' : 'book-outline'} size={13} color={hasJournal ? colors.brand.primaryLight : colors.textSecondary} />
-                  <Text style={[styles.heroStatText, { color: hasJournal ? colors.brand.primaryLight : colors.textSecondary }]}>
-                    {hasJournal ? 'Journaled ✓' : 'Journal open'}
-                  </Text>
-                </View>
-              </View>
-              {/* Progress bar */}
-              <View style={[styles.progressBar, { backgroundColor: colors.surfaceHigh }]}>
-                <View style={[styles.progressFill, { width: `${ringPct * 100}%` as any, backgroundColor: ringColor }]} />
-              </View>
+        {/* ── Zone 2: Animated Week Bar Chart (Dashboard Animation style, Clickable to Activity Calendar) ── */}
+        <TouchableOpacity
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/calendar'); }}
+          style={[mainStyle.heatmapCard, { backgroundColor: T.surface, borderColor: T.border }]}
+          activeOpacity={0.95}
+        >
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={mainStyle.heatmapTitle}>THIS WEEK</Text>
+            <Ionicons name="chevron-forward" size={14} color={T.textDim} />
+          </View>
+          <WeeklyBarChart days={currentWeekDays} isVisible={true} triggerKey={focusKey} />
+        </TouchableOpacity>
+
+        {/* ── Zone 3: Program Selector (Filter bar) ── */}
+        {profile.activeProgramIds.length > 0 && (
+          <View style={{ marginVertical: 4 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={mainStyle.filterScroll}>
+              <TouchableOpacity
+                onPress={() => { setSelectedFilter('all'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                style={[
+                  mainStyle.filterPill, 
+                  { 
+                    backgroundColor: selectedFilter === 'all' ? T.violetDim : T.card, 
+                    borderColor: selectedFilter === 'all' ? T.violet : T.border 
+                  }
+                ]}
+              >
+                <Text style={[mainStyle.filterText, { color: selectedFilter === 'all' ? T.violet : T.textMid }]}>All Protocols</Text>
+              </TouchableOpacity>
+              {profile.activeProgramIds.map(id => {
+                const prog = availablePrograms.find(p => p.id === id);
+                if (!prog) return null;
+                const active = selectedFilter === id;
+                return (
+                  <TouchableOpacity
+                    key={id}
+                    onPress={() => { setSelectedFilter(id); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                    style={[mainStyle.filterPill, { borderColor: active ? prog.color : T.border, backgroundColor: active ? prog.color + '15' : T.card }]}
+                  >
+                    <Text style={{ fontSize: 13 }}>{prog.emoji}</Text>
+                    <Text style={[mainStyle.filterText, { color: active ? prog.color : T.textMid }]}>{prog.title}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TouchableOpacity
+                onPress={() => { setSelectedFilter('routines'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                style={[
+                  mainStyle.filterPill, 
+                  { 
+                    borderColor: selectedFilter === 'routines' ? T.green : T.border, 
+                    backgroundColor: selectedFilter === 'routines' ? T.green + '15' : T.card 
+                  }
+                ]}
+              >
+                <Text style={{ fontSize: 13 }}>🧘</Text>
+                <Text style={[mainStyle.filterText, { color: selectedFilter === 'routines' ? T.green : T.textMid }]}>Routines</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        )}
+
+        {/* ── Zone 4: Program Protocol Blocks ── */}
+        {filteredGroups.length > 0 && (
+          <View style={mainStyle.section}>
+            <View style={mainStyle.sectionLabel}>
+              <View style={[mainStyle.sectionBar, { backgroundColor: T.violet }]} />
+              <Text style={mainStyle.sectionTitle}>Program Protocols</Text>
+            </View>
+            {filteredGroups.map(({ programId, metrics: pmx }) => {
+              const prog = availablePrograms.find(p => p.id === programId)!;
+              const progress = getProgramProgress?.(programId);
+              const currentWeek = progress?.currentWeek ?? 1;
+              return (
+                <ProgramBlock
+                  key={programId}
+                  programId={programId}
+                  programTitle={prog.title}
+                  programEmoji={prog.emoji ?? '📋'}
+                  programColor={prog.color ?? T.violet}
+                  weekLabel={`Week ${currentWeek} of ${prog.weeks?.length ?? 8}`}
+                  habits={pmx}
+                  today={today}
+                  weekDates={weekDates}
+                />
+              );
+            })}
+          </View>
+        )}
+
+        {/* ── Zone 5: Personal Routines ── */}
+        {showRoutines && routineMetrics.length > 0 && (
+          <View style={mainStyle.section}>
+            <View style={mainStyle.sectionLabel}>
+              <View style={[mainStyle.sectionBar, { backgroundColor: T.green }]} />
+              <Text style={mainStyle.sectionTitle}>My Routines</Text>
+            </View>
+            <View style={[mainStyle.routinesBlock, { backgroundColor: T.surface }]}>
+              {routineMetrics.map(m => (
+                <HabitRow
+                  key={m.id}
+                  metric={m}
+                  today={today}
+                  weekDates={weekDates}
+                  color={m.category === 'reduce' ? T.red : m.category === 'build' ? T.green : T.violet}
+                  isCustomRoutine={true}
+                />
+              ))}
             </View>
           </View>
-        </GlassCard>
-
-        {/* Section switcher */}
-        <View style={[styles.tabRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          {([
-            { key: 'all', label: `All · ${metrics.length}` },
-            { key: 'protocol', label: `Protocol · ${protocolMetrics.length}` },
-            { key: 'routines', label: `Routines · ${routineMetrics.length}` },
-          ] as const).map(t => (
-            <TouchableOpacity
-              key={t.key}
-              onPress={() => { setActiveSection(t.key); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-              style={[styles.tabBtn, { backgroundColor: activeSection === t.key ? colors.brand.primary : 'transparent' }]}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.tabBtnText, { color: activeSection === t.key ? '#fff' : colors.textSecondary }]}>
-                {t.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Protocol metrics */}
-        {(activeSection === 'all' || activeSection === 'protocol') && protocolMetrics.length > 0 && (
-          <View style={styles.sectionHeader}>
-            <View style={[styles.sectionDot, { backgroundColor: colors.brand.primary }]} />
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Program Protocols</Text>
-            <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>Gated core habits</Text>
-          </View>
-        )}
-        {(activeSection === 'all' || activeSection === 'protocol') && protocolMetrics.map(m => (
-          <HabitCard
-            key={m.id} metric={m} today={today} colors={colors}
-            isProgram programColor={programColorMap[m.id] ?? colors.brand.primary}
-          />
-        ))}
-
-        {/* Routines metrics */}
-        {(activeSection === 'all' || activeSection === 'routines') && (
-          <View style={styles.sectionHeader}>
-            <View style={[styles.sectionDot, { backgroundColor: colors.brand.success }]} />
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>My Routines</Text>
-            <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>Personal metrics</Text>
-          </View>
-        )}
-        {(activeSection === 'all' || activeSection === 'routines') && routineMetrics.map(m => (
-          <HabitCard key={m.id} metric={m} today={today} colors={colors} isProgram={false} />
-        ))}
-
-        {/* Empty state */}
-        {displayMetrics.length === 0 && (
-          <TouchableOpacity
-            onPress={openModal}
-            style={[styles.emptyState, { borderColor: colors.border }]}
-            activeOpacity={0.7}
-          >
-            <Text style={{ fontSize: 36 }}>✨</Text>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>Nothing here yet</Text>
-            <Text style={[styles.emptySub, { color: colors.textSecondary }]}>Tap to add your first tracker</Text>
-          </TouchableOpacity>
         )}
 
-        {/* Add more button */}
+        {/* ── Inline dashed add button at bottom ── */}
         <TouchableOpacity
-          onPress={openModal}
-          style={[styles.addMoreBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
-          activeOpacity={0.7}
+          onPress={() => setShowAdd(true)}
+          style={mainStyle.inlineAddBtn}
+          activeOpacity={0.8}
         >
-          <Ionicons name="add" size={18} color={colors.textSecondary} />
-          <Text style={[styles.addMoreText, { color: colors.textSecondary }]}>Add custom tracker</Text>
+          <Ionicons name="add-circle-outline" size={16} color={T.violet} />
+          <Text style={mainStyle.inlineAddBtnText}>Add custom tracker or template</Text>
         </TouchableOpacity>
+
+        {/* ── Empty state ── */}
+        {metrics.length === 0 && (
+          <View style={mainStyle.emptyState}>
+            <Text style={mainStyle.emptyEmoji}>⬛</Text>
+            <Text style={mainStyle.emptyTitle}>Board is empty</Text>
+            <Text style={mainStyle.emptySub}>Enrol in a program or add personal habits to start tracking.</Text>
+            <TouchableOpacity onPress={() => setShowAdd(true)} style={[mainStyle.emptyBtn, { backgroundColor: T.violet }]} activeOpacity={0.8}>
+              <Text style={mainStyle.emptyBtnText}>Add First Habit</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
 
-      {/* Add Tracker Modal */}
-      <Modal visible={showAddModal} animationType="slide" presentationStyle="pageSheet">
-        <KeyboardAvoidingView
-          style={[styles.modal, { backgroundColor: colors.background }]}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-            {modalStep === 'configure' ? (
-              <TouchableOpacity onPress={() => setModalStep('template')} activeOpacity={0.7}>
-                <Ionicons name="chevron-back" size={24} color={colors.text} />
-              </TouchableOpacity>
-            ) : <View style={{ width: 24 }} />}
-            <Text style={[styles.modalTitle, { color: colors.text }]}>
-              {modalStep === 'template' ? 'Add Tracker' : 'Configure Tracker'}
-            </Text>
-            <TouchableOpacity onPress={closeModal} activeOpacity={0.7}>
-              <Ionicons name="close" size={24} color={colors.text} />
-            </TouchableOpacity>
-          </View>
 
-          {modalStep === 'template' ? (
-            <ScrollView style={styles.modalContent} keyboardShouldPersistTaps="handled">
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>QUICK-START TEMPLATES</Text>
-              <View style={styles.templateGrid}>
-                {QUICK_TEMPLATES.map((t, i) => {
-                  const catColor = t.category === 'build' ? colors.brand.success : t.category === 'reduce' ? colors.brand.danger : colors.brand.primary;
-                  return (
-                    <TouchableOpacity
-                      key={i} onPress={() => applyTemplate(t)}
-                      style={[styles.templateCard, {
-                        backgroundColor: colors.surface, borderColor: catColor + '40',
-                        borderWidth: 1.5, borderRadius: 16,
-                      }]}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={styles.templateEmoji}>{t.emoji}</Text>
-                      <Text style={[styles.templateName, { color: colors.text }]}>{t.name}</Text>
-                      <View style={[styles.templateBadge, { backgroundColor: catColor + '15' }]}>
-                        <Text style={[styles.templateBadgeText, { color: catColor }]}>
-                          {t.category === 'build' ? '📈 Build' : t.category === 'reduce' ? '📉 Reduce' : '📊 Monitor'}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              <View style={styles.divider}>
-                <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-                <Text style={[styles.dividerText, { color: colors.textMuted }]}>or custom</Text>
-                <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-              </View>
-              
-              <TouchableOpacity
-                onPress={() => setModalStep('configure')}
-                style={{ width: '100%', marginBottom: 40 }}
-                activeOpacity={0.8}
-              >
-                <LinearGradient
-                  colors={colors.gradients.primaryShort}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.customBtnGradient}
-                >
-                  <Ionicons name="construct-outline" size={18} color="#fff" />
-                  <Text style={styles.customBtnText}>Create Custom Tracker</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </ScrollView>
-          ) : (
-            <ScrollView style={styles.modalContent} keyboardShouldPersistTaps="handled">
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>TRACKER NAME</Text>
-              <TextInput
-                value={newName} onChangeText={setNewName}
-                placeholder="e.g. Daily Run, Meditation, Sugar Clean..."
-                placeholderTextColor={colors.textDim} autoFocus
-                style={[styles.textInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-                selectionColor={colors.brand.primary}
-              />
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>EMOJI ICON</Text>
-              <TextInput
-                value={newEmoji} onChangeText={setNewEmoji}
-                placeholder="e.g. 🏃 🧘 🍭 💧"
-                placeholderTextColor={colors.textDim}
-                style={[styles.textInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-                selectionColor={colors.brand.primary}
-              />
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>HABIT CATEGORY</Text>
-              <View style={styles.catCards}>
-                {([
-                  { key: 'build', emoji: '📈', label: 'Build', desc: 'Do more of this', color: colors.brand.success },
-                  { key: 'reduce', emoji: '📉', label: 'Reduce', desc: 'Do less of this', color: colors.brand.danger },
-                  { key: 'neutral', emoji: '📊', label: 'Observe', desc: 'Just monitor values', color: colors.brand.primary },
-                ] as const).map(cat => {
-                  const selected = newCategory === cat.key;
-                  return (
-                    <TouchableOpacity
-                      key={cat.key}
-                      onPress={() => { setNewCategory(cat.key); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                      style={[styles.catCard, {
-                        backgroundColor: selected ? cat.color + '15' : colors.surface,
-                        borderColor: selected ? cat.color : colors.border,
-                      }]}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.catCardTop}>
-                        <Text style={{ fontSize: 20 }}>{cat.emoji}</Text>
-                        {selected && <Ionicons name="checkmark-circle" size={16} color={cat.color} />}
-                      </View>
-                      <Text style={[styles.catCardTitle, { color: selected ? cat.color : colors.text }]}>{cat.label}</Text>
-                      <Text style={[styles.catCardDesc, { color: colors.textSecondary }]}>{cat.desc}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>HOW TO LOG IT</Text>
-              <View style={styles.inputTypeRow}>
-                {([
-                  { key: 'boolean', label: 'Yes / No', icon: 'checkmark-circle-outline' as const },
-                  { key: 'counter', label: 'Counter', icon: 'add-circle-outline' as const },
-                  { key: 'scale', label: 'Scale 1–10', icon: 'bar-chart-outline' as const },
-                ] as const).map(type => {
-                  const selected = newInputType === type.key;
-                  return (
-                    <TouchableOpacity
-                      key={type.key}
-                      onPress={() => { setNewInputType(type.key); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                      style={[styles.inputTypeChip, {
-                        backgroundColor: selected ? colors.brand.primary + '15' : colors.surface,
-                        borderColor: selected ? colors.brand.primary : colors.border,
-                      }]}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name={type.icon} size={18} color={selected ? colors.brand.primary : colors.textSecondary} />
-                      <Text style={[styles.inputTypeText, { color: selected ? colors.brand.primary : colors.text }]}>{type.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              
-              {newInputType !== 'boolean' && (
-                <>
-                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>UNIT LABEL (optional)</Text>
-                  <TextInput
-                    value={newUnit} onChangeText={setNewUnit}
-                    placeholder="e.g. km, pages, glasses..."
-                    placeholderTextColor={colors.textDim}
-                    style={[styles.textInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-                    selectionColor={colors.brand.primary}
-                  />
-                </>
-              )}
-              
-              <TouchableOpacity onPress={handleAddMetric} activeOpacity={0.88} style={{ marginTop: 8, marginBottom: 40 }}>
-                <LinearGradient
-                  colors={colors.gradients.primaryShort}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.saveBtnGradient}
-                >
-                  <Ionicons name="add-circle-outline" size={20} color="#fff" />
-                  <Text style={styles.saveBtnText}>Add Tracker</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </ScrollView>
-          )}
-        </KeyboardAvoidingView>
-      </Modal>
+      {/* ── Add Tracker Modal ── */}
+      <AddTrackerModal
+        visible={showAdd}
+        onClose={() => setShowAdd(false)}
+        onAdd={addCustomMetric}
+      />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-  content: { paddingHorizontal: 16, gap: 12 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 4 },
-  title: { fontSize: 28, fontFamily: 'Inter_700Bold', letterSpacing: -0.5 },
-  dateLabel: { fontSize: 13, fontFamily: 'Inter_400Regular', marginTop: 2 },
-  addBtnGradient: { width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  
-  // Background radial blur
-  blurBlobContainer: {
-    position: 'absolute',
-    top: -150,
-    left: -50,
-    right: -50,
-    height: 400,
-    zIndex: -1,
-  },
-  blurBlob: {
-    width: '100%',
-    height: '100%',
-    opacity: 0.5,
-  },
+const mainStyle = StyleSheet.create({
+  root: { flex: 1, backgroundColor: T.bg },
+  ambientGlow: { position: 'absolute', top: 0, left: 0, right: 0, height: 200, zIndex: 0 },
+  scroll: { gap: 14, paddingHorizontal: 0 },
+  pageHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 4 },
+  pageDateLabel: { fontSize: 12, fontFamily: 'Inter_400Regular', color: T.textDim, letterSpacing: 0.3 },
+  pageTitle: { fontSize: 32, fontFamily: 'Inter_700Bold', color: T.text, letterSpacing: -1, marginTop: 2 },
+  headerAddBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: T.surface, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: T.border },
+  headerAddBtnText: { fontSize: 13, fontFamily: 'Inter_700Bold', color: T.text },
 
-  // Hero Card content
-  heroCardContent: { flexDirection: 'row', alignItems: 'center', gap: 18, padding: 18 },
-  ringNum: { fontSize: 22, fontFamily: 'Inter_700Bold', lineHeight: 24 },
-  ringDen: { fontSize: 11, fontFamily: 'Inter_500Medium' },
-  heroLabel: { fontSize: 15, fontFamily: 'Inter_700Bold' },
-  heroStatRow: { flexDirection: 'row', gap: 14 },
-  heroStat: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  heroStatText: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
-  progressBar: { height: 5, borderRadius: 3, overflow: 'hidden' },
-  progressFill: { height: 5, borderRadius: 3 },
-  tabRow: { flexDirection: 'row', borderRadius: 14, borderWidth: 1, padding: 4, gap: 2 },
-  tabBtn: { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
-  tabBtnText: { fontSize: 11, fontFamily: 'Inter_700Bold' },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, marginTop: 6 },
-  sectionDot: { width: 8, height: 8, borderRadius: 4 },
-  sectionTitle: { fontSize: 14, fontFamily: 'Inter_700Bold', flex: 1 },
-  sectionSub: { fontSize: 11, fontFamily: 'Inter_400Regular' },
-  emptyState: { alignItems: 'center', gap: 8, padding: 40, borderWidth: 1, borderStyle: 'dashed', borderRadius: 18 },
-  emptyTitle: { fontSize: 16, fontFamily: 'Inter_700Bold' },
-  emptySub: { fontSize: 13, fontFamily: 'Inter_400Regular' },
-  addMoreBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderStyle: 'dashed', borderRadius: 14, paddingVertical: 16 },
-  addMoreText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
-  
-  modal: { flex: 1 },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, paddingTop: 20, borderBottomWidth: 1 },
-  modalTitle: { fontSize: 17, fontFamily: 'Inter_700Bold' },
-  modalContent: { flex: 1, padding: 16 },
-  fieldLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 2, marginBottom: 8, marginTop: 16 },
-  templateGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  templateCard: { width: '48%', padding: 14, gap: 6, borderWidth: 1 },
-  templateEmoji: { fontSize: 24, marginBottom: 2 },
-  templateName: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
-  templateBadge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginTop: 2 },
-  templateBadgeText: { fontSize: 10, fontFamily: 'Inter_700Bold' },
-  divider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 16 },
-  dividerLine: { flex: 1, height: 1 },
-  dividerText: { fontSize: 12, fontFamily: 'Inter_500Medium' },
-  customBtnGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16, borderRadius: 14 },
-  customBtnText: { fontSize: 14, fontFamily: 'Inter_700Bold', color: '#fff' },
-  textInput: { borderWidth: 1, borderRadius: 14, padding: 14, fontSize: 15, fontFamily: 'Inter_400Regular', marginBottom: 4 },
-  catCards: { flexDirection: 'row', gap: 8, marginBottom: 4 },
-  catCard: { flex: 1, borderWidth: 1.5, borderRadius: 14, padding: 12, gap: 4 },
-  catCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  catCardTitle: { fontSize: 12, fontFamily: 'Inter_700Bold' },
-  catCardDesc: { fontSize: 10, fontFamily: 'Inter_400Regular', lineHeight: 14 },
-  inputTypeRow: { flexDirection: 'row', gap: 8, marginBottom: 4 },
-  inputTypeChip: { flex: 1, borderWidth: 1.5, borderRadius: 12, padding: 12, alignItems: 'center', gap: 6 },
-  inputTypeText: { fontSize: 11, fontFamily: 'Inter_600SemiBold', textAlign: 'center' },
-  saveBtnGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16, borderRadius: 16 },
-  saveBtnText: { fontSize: 16, fontFamily: 'Inter_700Bold', color: '#fff' },
+  heatmapCard: { marginHorizontal: 16, backgroundColor: T.surface, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: T.border },
+  heatmapTitle: { fontSize: 10, fontFamily: 'Inter_700Bold', color: T.textDim, letterSpacing: 1.5 },
+
+  filterScroll: { paddingHorizontal: 16, gap: 8 },
+  filterPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: T.border, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 14, backgroundColor: T.card },
+  filterPillActive: { borderColor: T.violet, backgroundColor: T.violetDim },
+  filterText: { fontSize: 12, fontFamily: 'Inter_600SemiBold', color: T.textMid },
+  filterTextActive: { color: T.violet },
+
+  section: { paddingHorizontal: 16, gap: 10 },
+  sectionLabel: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+  sectionBar: { width: 4, height: 16, borderRadius: 2 },
+  sectionTitle: { fontSize: 12, fontFamily: 'Inter_700Bold', color: T.textDim, textTransform: 'uppercase', letterSpacing: 1 },
+
+  routinesBlock: { backgroundColor: T.surface, borderRadius: 16, paddingHorizontal: 14, paddingTop: 4, paddingBottom: 4 },
+  inlineAddBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, paddingVertical: 14, borderStyle: 'dashed', borderWidth: 1, borderColor: T.borderMid, borderRadius: 16, backgroundColor: T.surface },
+  inlineAddBtnText: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: T.textMid },
+
+  emptyState: { margin: 20, alignItems: 'center', gap: 10, paddingVertical: 60 },
+  emptyEmoji: { fontSize: 40 },
+  emptyTitle: { fontSize: 20, fontFamily: 'Inter_700Bold', color: T.text },
+  emptySub: { fontSize: 14, fontFamily: 'Inter_400Regular', color: T.textMid, textAlign: 'center', lineHeight: 22 },
+  emptyBtn: { paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14, marginTop: 8 },
+  emptyBtnText: { fontSize: 15, fontFamily: 'Inter_700Bold', color: '#fff' },
 });

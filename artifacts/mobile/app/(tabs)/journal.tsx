@@ -1,11 +1,26 @@
+/**
+ * Journal — Swiss Design × Gamified Reflection Engine
+ *
+ * Architecture:
+ * - Swiss grid discipline (8pt baseline, tight typographic hierarchy)
+ * - Gamified XP + streak system with animated counters
+ * - Active program journals with clear visual identity
+ * - Fluid Reanimated 3 micro-interactions throughout
+ * - OLED-optimised dark-first palette
+ */
+
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
-import Reanimated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, withSequence, withDelay, runOnJS, withRepeat } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
-import { RADIUS, BRAND } from '@/constants/colors';
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
+  Dimensions,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,616 +28,566 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Reanimated, {
+  Easing as RAEasing,
+  FadeIn,
+  FadeInDown,
+  FadeInUp,
+  interpolate,
+  runOnJS,
+  useAnimatedReaction,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/context/AppContext';
 import { useColors } from '@/hooks/useColors';
+import { BRAND } from '@/constants/colors';
 import { DAILY_JOURNAL_PROMPTS } from '@/constants/program';
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+const { width: SW } = Dimensions.get('window');
 
 const DAILY_JOURNAL_XP = 25;
 const WORD_COUNT_BONUS_XP = 5;
+const DEEP_WRITE_THRESHOLD = 50;
 
-const TAG_DEFS = [
-  { id: 'stress', emoji: '😰', label: 'Stress', color: '#ef4444' },
-  { id: 'sleep', emoji: '😴', label: 'Sleep', color: '#6366f1' },
-  { id: 'craving', emoji: '🤤', label: 'Craving', color: '#f59e0b' },
-  { id: 'win', emoji: '🏆', label: 'Win', color: '#22c55e' },
-  { id: 'social', emoji: '👥', label: 'Social', color: '#06b6d4' },
-  { id: 'work', emoji: '💼', label: 'Work', color: '#8b5cf6' },
-  { id: 'fitness', emoji: '💪', label: 'Fitness', color: '#10b981' },
-  { id: 'mindfulness', emoji: '🧘', label: 'Mindfulness', color: '#6366f1' },
-  { id: 'relapse', emoji: '⚠️', label: 'Relapse', color: '#ef4444' },
+const PROGRAM_ACCENTS = [
+  { primary: '#5B5EFF', glow: 'rgba(91,94,255,0.3)' },
+  { primary: '#00D68F', glow: 'rgba(0,214,143,0.3)' },
+  { primary: '#FF6B6B', glow: 'rgba(255,107,107,0.3)' },
+  { primary: '#FFB700', glow: 'rgba(255,183,0,0.3)' },
+  { primary: '#00D2FF', glow: 'rgba(0,210,255,0.3)' },
+  { primary: '#A855F7', glow: 'rgba(168,85,247,0.3)' },
 ];
 
-// ─── Dynamic Prompt Engine ────────────────────────────────────────────────────
-// Generates contextual prompts based on today's tracking data + program week
+const TAG_DEFS = [
+  { id: 'stress',      emoji: '😰', label: 'Stress',      color: '#ef4444' },
+  { id: 'sleep',       emoji: '😴', label: 'Sleep',        color: '#6366f1' },
+  { id: 'craving',     emoji: '🤤', label: 'Craving',      color: '#f59e0b' },
+  { id: 'win',         emoji: '🏆', label: 'Win',          color: '#22c55e' },
+  { id: 'social',      emoji: '👥', label: 'Social',       color: '#06b6d4' },
+  { id: 'work',        emoji: '💼', label: 'Work',         color: '#8b5cf6' },
+  { id: 'fitness',     emoji: '💪', label: 'Fitness',      color: '#10b981' },
+  { id: 'mindfulness', emoji: '🧘', label: 'Mindful',      color: '#6366f1' },
+  { id: 'relapse',     emoji: '⚠️', label: 'Relapse',      color: '#ef4444' },
+];
 
-function buildDynamicPrompts(
-  primaryPrompt: string,
-  missedTasks: string[],
-  hitTasks: string[],
-): string[] {
-  const prompts: string[] = [primaryPrompt];
-
-  if (missedTasks.length > 0) {
-    prompts.push(`You missed "${missedTasks[0]}" today. What was the main barrier, and what's one thing you could do differently tomorrow?`);
-  }
-  if (hitTasks.length >= 3) {
-    prompts.push(`You completed ${hitTasks.length} protocol tasks today. What made today work? What can you repeat tomorrow?`);
-  }
-  if (missedTasks.length === 0 && hitTasks.length > 0) {
-    prompts.push('You stayed on track today. What mental state or environment made that possible?');
-  }
-
-  return prompts;
+function buildDynamicPrompts(primary: string, missed: string[], hit: string[]): string[] {
+  const ps: string[] = [primary];
+  if (missed.length > 0)
+    ps.push(`You missed "${missed[0]}" today. What was the barrier?`);
+  if (hit.length >= 3)
+    ps.push(`You completed ${hit.length} tasks today. What made today click?`);
+  if (missed.length === 0 && hit.length > 0)
+    ps.push('You stayed on track today. What environment made that possible?');
+  return ps;
 }
 
-// ─── Tag Heatmap ──────────────────────────────────────────────────────────────
-
-function TagCloud({ tagCounts, total, colors }: { tagCounts: Record<string, number>; total: number; colors: any }) {
-  if (Object.keys(tagCounts).length === 0) return null;
-  const sorted = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]);
-  return (
-    <View style={tcStyles.wrap}>
-      {sorted.map(([tagId, count]) => {
-        const def = TAG_DEFS.find(t => t.id === tagId);
-        if (!def) return null;
-        const opacity = Math.max(0.3, count / Math.max(...Object.values(tagCounts)));
-        return (
-          <View
-            key={tagId}
-            style={[tcStyles.chip, { backgroundColor: def.color + Math.round(opacity * 255).toString(16).padStart(2, '0') }]}
-          >
-            <Text style={tcStyles.chipEmoji}>{def.emoji}</Text>
-            <Text style={tcStyles.chipLabel}>{def.label}</Text>
-            <Text style={tcStyles.chipCount}>{count}</Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-const tcStyles = StyleSheet.create({
-  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
-  chipEmoji: { fontSize: 13 },
-  chipLabel: { fontSize: 12, fontFamily: 'Inter_600SemiBold', color: '#fff' },
-  chipCount: { fontSize: 11, fontFamily: 'Inter_700Bold', color: '#ffffffcc' },
-});
-
-// ─── Mood Grid ────────────────────────────────────────────────────────────────
-// Replaces the old 1-10 slider with a 30-day calendar heatmap of tag density
-
-function MoodHeatmap({ entries, colors }: { entries: any[]; colors: any }) {
-  const today = new Date();
-  const days = Array.from({ length: 28 }, (_, i) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - (27 - i));
-    const ds = d.toISOString().split('T')[0];
-    const entry = entries.find((e: any) => e.date === ds);
-    return { ds, entry, dayNum: d.getDate(), isToday: ds === today.toISOString().split('T')[0] };
-  });
-
-  const getColor = (entry: any) => {
-    if (!entry) return colors.border + '40';
-    const isWin = entry.tags?.includes('win');
-    const isRelapse = entry.tags?.includes('relapse') || entry.tags?.includes('craving');
-    if (isWin) return '#22c55e';
-    if (isRelapse) return '#ef4444';
-    if ((entry.wordCount ?? 0) >= 50) return colors.primary;
-    return colors.primary + '60';
-  };
-
-  return (
-    <View style={hmStyles.grid}>
-      {days.map(({ ds, entry, dayNum, isToday }) => (
-        <View
-          key={ds}
-          style={[hmStyles.cell, {
-            backgroundColor: getColor(entry),
-            borderWidth: isToday ? 2 : 0,
-            borderColor: colors.foreground,
-          }]}
-        >
-          {isToday && <Text style={hmStyles.todayDot}>·</Text>}
-        </View>
-      ))}
-    </View>
-  );
-}
-
-const hmStyles = StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  cell: { width: 28, height: 28, borderRadius: 6 },
-  todayDot: { position: 'absolute', bottom: 2, right: 4, fontSize: 10, color: '#fff', fontFamily: 'Inter_700Bold' },
-});
-
-// ─── Entry Card ───────────────────────────────────────────────────────────────
-
-function EntryCard({ entry, colors }: { entry: any; colors: any }) {
-  const [expanded, setExpanded] = useState(false);
-  const date = new Date(entry.date + 'T12:00:00');
-  const dateLabel = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  const tags = entry.tags ?? [];
-
-  return (
-    <TouchableOpacity
-      onPress={() => { setExpanded(e => !e); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-      activeOpacity={0.85}
-      style={[ecStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-    >
-      <View style={ecStyles.header}>
-        <View style={ecStyles.dateBlock}>
-          <Text style={[ecStyles.date, { color: colors.mutedForeground }]}>{dateLabel}</Text>
-          {(entry.wordCount ?? 0) > 0 && (
-            <Text style={[ecStyles.wc, { color: colors.mutedForeground }]}>{entry.wordCount}w</Text>
-          )}
-        </View>
-        <View style={ecStyles.tagRow}>
-          {tags.slice(0, 3).map((tagId: string) => {
-            const def = TAG_DEFS.find(t => t.id === tagId);
-            if (!def) return null;
-            return (
-              <View key={tagId} style={[ecStyles.tagBadge, { backgroundColor: def.color + '20' }]}>
-                <Text style={{ fontSize: 11 }}>{def.emoji}</Text>
-              </View>
-            );
-          })}
-          {tags.length > 3 && (
-            <View style={[ecStyles.tagBadge, { backgroundColor: colors.border }]}>
-              <Text style={[ecStyles.moreText, { color: colors.mutedForeground }]}>+{tags.length - 3}</Text>
-            </View>
-          )}
-        </View>
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={colors.mutedForeground} />
-      </View>
-
-      {!expanded && (
-        <Text style={[ecStyles.preview, { color: colors.mutedForeground }]} numberOfLines={2}>
-          {entry.response}
-        </Text>
-      )}
-
-      {expanded && (
-        <View style={ecStyles.expanded}>
-          <View style={[ecStyles.promptBubble, { backgroundColor: colors.background, borderColor: colors.border }]}>
-            <Text style={[ecStyles.promptLabel, { color: colors.mutedForeground }]}>PROMPT</Text>
-            <Text style={[ecStyles.promptText, { color: colors.foreground }]}>{entry.prompt}</Text>
-          </View>
-          <Text style={[ecStyles.fullResponse, { color: colors.foreground }]}>{entry.response}</Text>
-          {entry.freeResponse ? (
-            <View style={[ecStyles.freeWrap, { borderTopColor: colors.border }]}>
-              <Text style={[ecStyles.freeLabel, { color: colors.mutedForeground }]}>FREE REFLECTION</Text>
-              <Text style={[ecStyles.fullResponse, { color: colors.foreground }]}>{entry.freeResponse}</Text>
-            </View>
-          ) : null}
-          {tags.length > 0 && (
-            <View style={ecStyles.allTags}>
-              {tags.map((tagId: string) => {
-                const def = TAG_DEFS.find(t => t.id === tagId);
-                if (!def) return null;
-                return (
-                  <View key={tagId} style={[ecStyles.tagBadge, { backgroundColor: def.color + '20' }]}>
-                    <Text style={{ fontSize: 12 }}>{def.emoji}</Text>
-                    <Text style={[ecStyles.tagBadgeText, { color: def.color }]}>{def.label}</Text>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
-      )}
-    </TouchableOpacity>
-  );
-}
-
-const ecStyles = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: 18, padding: 16, gap: 10, marginBottom: 10 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  dateBlock: { flex: 1, gap: 1 },
-  date: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
-  wc: { fontSize: 10, fontFamily: 'Inter_400Regular' },
-  tagRow: { flexDirection: 'row', gap: 4, alignItems: 'center' },
-  tagBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 4, borderRadius: 8 },
-  tagBadgeText: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
-  moreText: { fontSize: 10, fontFamily: 'Inter_700Bold' },
-  preview: { fontSize: 13, fontFamily: 'Inter_400Regular', lineHeight: 19 },
-  expanded: { gap: 12 },
-  promptBubble: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 4 },
-  promptLabel: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 2 },
-  promptText: { fontSize: 13, fontFamily: 'Inter_500Medium', lineHeight: 19, fontStyle: 'italic' },
-  fullResponse: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 22 },
-  freeWrap: { borderTopWidth: 1, paddingTop: 10, gap: 4 },
-  freeLabel: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 2 },
-  allTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-});
-
-// ─── Premium Save Button ────────────────────────────────────────────────────────
 const CONFETTI_COLORS = ['#f43f5e', '#a855f7', '#3b82f6', '#22c55e', '#f59e0b', '#fff'];
-const NUM_CONFETTI = 30;
 
 function ConfettiPiece({ index, trigger }: { index: number; trigger: boolean }) {
   const y = useSharedValue(0);
   const x = useSharedValue(0);
-  const rotation = useSharedValue(0);
-  const opacity = useSharedValue(0);
-  const scale = useSharedValue(0);
-  
+  const rot = useSharedValue(0);
+  const op = useSharedValue(0);
+  const sc = useSharedValue(0);
   const color = useMemo(() => CONFETTI_COLORS[index % CONFETTI_COLORS.length], []);
-  const size = useMemo(() => Math.random() * 8 + 6, []);
-  
+  const size = useMemo(() => Math.random() * 8 + 5, []);
+
   useEffect(() => {
     if (trigger) {
-      const angle = (Math.random() * Math.PI) + Math.PI; // Upwards semicircle
-      const velocity = Math.random() * 250 + 100;
-      
-      opacity.value = 1;
-      scale.value = withSpring(1);
-      
-      x.value = withTiming(Math.cos(angle) * velocity, { duration: 1200 });
-      y.value = withTiming(Math.sin(angle) * velocity + (Math.random() * 50 + 50), { duration: 1200 });
-      
-      rotation.value = withTiming(Math.random() * 720 - 360, { duration: 1200 });
-      opacity.value = withDelay(600, withTiming(0, { duration: 600 }));
+      const angle = Math.random() * Math.PI + Math.PI;
+      const vel = Math.random() * 260 + 100;
+      op.value = 1;
+      sc.value = withSpring(1);
+      x.value = withTiming(Math.cos(angle) * vel, { duration: 1300 });
+      y.value = withTiming(Math.sin(angle) * vel + Math.random() * 60 + 40, { duration: 1300 });
+      rot.value = withTiming(Math.random() * 720 - 360, { duration: 1300 });
+      op.value = withDelay(600, withTiming(0, { duration: 700 }));
     }
   }, [trigger]);
 
-  const style = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: x.value },
-      { translateY: y.value },
-      { rotate: `${rotation.value}deg` },
-      { scale: scale.value }
-    ],
-    opacity: opacity.value,
+  const s = useAnimatedStyle(() => ({
+    transform: [{ translateX: x.value }, { translateY: y.value }, { rotate: `${rot.value}deg` }, { scale: sc.value }],
+    opacity: op.value,
   }));
+  return <Reanimated.View style={[{ position: 'absolute', width: size, height: size, backgroundColor: color, borderRadius: size / 3, zIndex: 50 }, s]} />;
+}
 
+function PulsingDot({ color }: { color: string }) {
+  const sc = useSharedValue(1);
+  const op = useSharedValue(0.6);
+  useEffect(() => {
+    sc.value = withRepeat(withSequence(withTiming(1.5, { duration: 900, easing: RAEasing.out(RAEasing.quad) }), withTiming(1, { duration: 900 })), -1, false);
+    op.value = withRepeat(withSequence(withTiming(1, { duration: 900 }), withTiming(0.3, { duration: 900 })), -1, false);
+  }, []);
+  const s = useAnimatedStyle(() => ({ transform: [{ scale: sc.value }], opacity: op.value }));
+  return <Reanimated.View style={[{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: color }, s]} />;
+}
+
+function XPBadge({ xp }: { xp: number }) {
+  const sc = useSharedValue(0.8);
+  const op = useSharedValue(0);
+  useEffect(() => {
+    sc.value = withSpring(1, { damping: 12, stiffness: 180 });
+    op.value = withTiming(1, { duration: 300 });
+  }, []);
+  const s = useAnimatedStyle(() => ({ transform: [{ scale: sc.value }], opacity: op.value }));
   return (
-    <Reanimated.View style={[
-      {
-        position: 'absolute',
-        width: size,
-        height: size,
-        backgroundColor: color,
-        borderRadius: size / 2,
-        zIndex: 50,
-      },
-      style
-    ]} />
+    <Reanimated.View style={s}>
+      <LinearGradient colors={['#FFD700', '#FFA500']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={SC.xpBadge}>
+        <Ionicons name="star" size={11} color="#000" />
+        <Text style={SC.xpBadgeText}>+{xp} XP</Text>
+      </LinearGradient>
+    </Reanimated.View>
   );
 }
 
-function PremiumSaveButton({
-  onPress,
-  disabled,
-  saved,
-  xp,
-  colors,
-}: {
-  onPress: () => void;
-  disabled: boolean;
-  saved: boolean;
-  xp: number;
-  colors: any;
-}) {
-  const scale = useSharedValue(1);
-  const breath = useSharedValue(1);
-  const width = useSharedValue(220); // initial width
-  const xpY = useSharedValue(0);
-  const xpOpacity = useSharedValue(0);
-
-  const confettiArray = useMemo(() => Array.from({ length: NUM_CONFETTI }), []);
-
+function StreakRing({ streak, colors }: { streak: number; colors: any }) {
+  const glow = useSharedValue(0);
   useEffect(() => {
-    if (!disabled && !saved) {
-      breath.value = withRepeat(
-        withSequence(
-          withTiming(1.02, { duration: 1200 }),
-          withTiming(1, { duration: 1200 })
-        ),
-        -1,
-        true
-      );
-    } else {
-      breath.value = withTiming(1);
+    if (streak > 0) {
+      glow.value = withRepeat(withSequence(withTiming(1, { duration: 1500 }), withTiming(0.3, { duration: 1500 })), -1, false);
     }
-
-    if (saved) {
-      // Morph to circle and trigger effects
-      width.value = withSpring(56, { damping: 12 }); // 56x56 circle
-      
-      // XP float up
-      xpY.value = withSpring(-40, { damping: 12, stiffness: 100 });
-      xpOpacity.value = withSequence(
-        withTiming(1, { duration: 200 }),
-        withDelay(1500, withTiming(0, { duration: 300 }))
-      );
-
-      // Heavy haptics
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-      setTimeout(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success), 200);
-    }
-  }, [disabled, saved]);
-
-  const handlePressIn = () => {
-    if (disabled || saved) return;
-    scale.value = withSpring(0.9, { damping: 8, stiffness: 200 });
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  };
-
-  const handlePressOut = () => {
-    if (disabled || saved) return;
-    scale.value = withSpring(1, { damping: 10, stiffness: 150 });
-  };
-
-  const wrapperStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value * breath.value }],
-    width: width.value,
-  }));
-
-  const xpStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: xpY.value }],
-    opacity: xpOpacity.value,
-  }));
-
-  return (
-    <View style={{ alignItems: 'center', marginVertical: 16, height: 60, justifyContent: 'center' }}>
-      {/* Floating XP */}
-      <Reanimated.View style={[{ position: 'absolute', zIndex: 100 }, xpStyle]}>
-        <Text style={{ color: '#22c55e', fontFamily: 'Inter_700Bold', fontSize: 16, textShadowColor: 'rgba(0,0,0,0.2)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 }}>
-          +{xp} XP
-        </Text>
-      </Reanimated.View>
-
-      {/* Confetti Explosion */}
-      <View style={{ position: 'absolute', zIndex: -1 }}>
-        {confettiArray.map((_, i) => (
-          <ConfettiPiece key={i} index={i} trigger={saved} />
-        ))}
+  }, [streak]);
+  const glowS = useAnimatedStyle(() => ({ shadowOpacity: glow.value * 0.7 }));
+  if (streak === 0) {
+    return (
+      <View style={[SC.streakRing, { borderColor: colors.border }]}>
+        <Ionicons name="flame-outline" size={18} color={colors.textMuted} />
+        <Text style={[SC.streakNum, { color: colors.textMuted }]}>0</Text>
       </View>
+    );
+  }
+  return (
+    <Reanimated.View style={[SC.streakRing, SC.streakActive, glowS]}>
+      <Ionicons name="flame" size={18} color="#f59e0b" />
+      <Text style={[SC.streakNum, { color: '#f59e0b' }]}>{streak}</Text>
+    </Reanimated.View>
+  );
+}
 
-      <Reanimated.View style={[wrapperStyle]}>
-        <TouchableOpacity
-          onPressIn={handlePressIn}
-          onPressOut={handlePressOut}
-          onPress={onPress}
-          disabled={disabled || saved}
-          activeOpacity={1}
-          style={{
-            borderRadius: 30,
-            overflow: 'hidden',
-            shadowColor: saved ? '#22c55e' : colors.primary,
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: disabled ? 0 : (saved ? 0.6 : 0.3),
-            shadowRadius: 10,
-            height: 56,
-          }}
-        >
-          <LinearGradient
-            colors={saved ? ['#22c55e', '#10b981'] : [colors.primary, colors.accent || '#6366f1']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={{
-              flex: 1,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              opacity: disabled ? 0.4 : 1,
-            }}
-          >
-            {saved ? (
-              <Ionicons name="checkmark-sharp" size={26} color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="sparkles" size={18} color="#fff" />
-                <Text style={{ fontSize: 14, fontFamily: 'Inter_700Bold', color: '#fff' }}>
-                  Save Reflection (+{xp} XP)
-                </Text>
-              </>
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
-      </Reanimated.View>
+function ProgramBadge({ name, week, accent, isWeekly }: { name: string; week: number; accent: { primary: string; glow: string }; isWeekly?: boolean }) {
+  const sh = useSharedValue(0);
+  useEffect(() => {
+    sh.value = withRepeat(withSequence(withTiming(1, { duration: 2000 }), withTiming(0, { duration: 2000 })), -1, false);
+  }, []);
+  const shS = useAnimatedStyle(() => ({ opacity: 0.5 + sh.value * 0.5 }));
+  return (
+    <View style={[SC.progBadgeWrap, { borderColor: accent.primary + '40' }]}>
+      <LinearGradient colors={[accent.primary + '18', accent.primary + '05']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={SC.progBadgeGrad}>
+        <View style={[SC.progBadgeDot, { backgroundColor: accent.primary + '20' }]}>
+          <PulsingDot color={accent.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[SC.progBadgeName, { color: accent.primary }]} numberOfLines={1}>
+            {isWeekly ? '◆ WEEKLY REFLECTION' : name.toUpperCase()}
+          </Text>
+          <Text style={SC.progBadgeSub}>{isWeekly ? 'End of week synthesis' : `Week ${week} · Daily Prompt`}</Text>
+        </View>
+        {isWeekly && <Reanimated.View style={shS}><Ionicons name="sparkles" size={16} color={accent.primary} /></Reanimated.View>}
+      </LinearGradient>
     </View>
   );
 }
 
-// ─── Save Celebration Modal ───────────────────────────────────────────────────
-function SaveCelebrationModal({
-  xp,
-  currentLevel,
-  levelProgress,
-  levelMax,
-  onClose,
-}: {
-  xp: number;
-  currentLevel: number;
-  levelProgress: number;
-  levelMax: number;
-  onClose: () => void;
+function PromptCard({ prompt, accent, programName, programWeek, isWeekly, isDynamic, promptIndex, totalPrompts, onNext, onPrev, colors }: {
+  prompt: string; accent: { primary: string; glow: string }; programName: string; programWeek: number;
+  isWeekly: boolean; isDynamic: boolean; promptIndex: number; totalPrompts: number;
+  onNext: () => void; onPrev: () => void; colors: any;
 }) {
-  const colors = useColors();
-  const scale = useSharedValue(0.5);
-  const opacity = useSharedValue(0);
-  const progressWidth = useSharedValue(0);
-  
-  const confettiArray = useMemo(() => Array.from({ length: 40 }), []);
+  const tx = useSharedValue(0);
+  const op = useSharedValue(1);
+  const prevIdx = useRef(promptIndex);
 
   useEffect(() => {
-    scale.value = withSpring(1, { damping: 12, stiffness: 120 });
-    opacity.value = withTiming(1, { duration: 300 });
+    if (prevIdx.current !== promptIndex) {
+      const dir = promptIndex > prevIdx.current ? 1 : -1;
+      tx.value = dir * 40; op.value = 0;
+      tx.value = withSpring(0, { damping: 20, stiffness: 200 });
+      op.value = withTiming(1, { duration: 300 });
+      prevIdx.current = promptIndex;
+    }
+  }, [promptIndex]);
 
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-    const prevProgress = Math.max(0, levelProgress - xp);
-    const startPct = prevProgress / levelMax;
-    const endPct = levelProgress / levelMax;
-
-    progressWidth.value = startPct;
-    progressWidth.value = withDelay(400, withSpring(endPct, { damping: 15, stiffness: 80 }));
-  }, []);
-
-  const cardStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-    opacity: opacity.value,
-  }));
-
-  const bgStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-  }));
-
-  const barStyle = useAnimatedStyle(() => ({
-    width: `${progressWidth.value * 100}%` as any,
-  }));
+  const tS = useAnimatedStyle(() => ({ transform: [{ translateX: tx.value }], opacity: op.value }));
 
   return (
-    <Reanimated.View style={[
-      celebrationStyles.overlay, 
-      { backgroundColor: 'rgba(0,0,0,0.85)' },
-      bgStyle
-    ]}>
+    <View style={[SC.promptCard, { borderColor: accent.primary + '30' }]}>
+      <LinearGradient colors={[accent.primary + '12', 'transparent']} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
+      <ProgramBadge name={programName} week={programWeek} accent={accent} isWeekly={isWeekly} />
+      <Reanimated.Text style={[SC.promptText, { color: colors.foreground }, tS]}>{prompt}</Reanimated.Text>
+      {isDynamic && totalPrompts > 1 && (
+        <View style={SC.promptNavRow}>
+          <TouchableOpacity onPress={() => { onPrev(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} style={[SC.promptNavBtn, { borderColor: accent.primary + '50' }]} activeOpacity={0.7}>
+            <Ionicons name="chevron-back" size={14} color={accent.primary} />
+          </TouchableOpacity>
+          <View style={SC.promptDots}>
+            {Array.from({ length: totalPrompts }).map((_, i) => (
+              <View key={i} style={[SC.promptDot, { backgroundColor: i === promptIndex ? accent.primary : accent.primary + '30', width: i === promptIndex ? 20 : 6 }]} />
+            ))}
+          </View>
+          <TouchableOpacity onPress={() => { onNext(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} style={[SC.promptNavBtn, { borderColor: accent.primary + '50' }]} activeOpacity={0.7}>
+            <Ionicons name="chevron-forward" size={14} color={accent.primary} />
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function WritingEditor({ value, onChangeText, placeholder, colors, accent, wordCount, isFocused, onFocus, onBlur }: {
+  value: string; onChangeText: (t: string) => void; placeholder: string; colors: any;
+  accent: { primary: string; glow: string }; wordCount?: number; isFocused: boolean; onFocus: () => void; onBlur: () => void;
+}) {
+  const bAnim = useSharedValue(0);
+  useEffect(() => { bAnim.value = withTiming(isFocused ? 1 : 0, { duration: 300 }); }, [isFocused]);
+  const bS = useAnimatedStyle(() => ({
+    borderColor: isFocused ? accent.primary : colors.border,
+    shadowOpacity: bAnim.value * 0.4,
+    shadowColor: accent.primary,
+  }));
+  const isDeep = (wordCount ?? 0) >= DEEP_WRITE_THRESHOLD;
+  return (
+    <Reanimated.View style={[SC.editorWrap, { backgroundColor: colors.surfaceHigh }, bS]}>
+      <TextInput value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={colors.textMuted} multiline textAlignVertical="top" onFocus={onFocus} onBlur={onBlur} style={[SC.editorInput, { color: colors.foreground }]} />
+      {wordCount !== undefined && (
+        <View style={SC.editorFooter}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={[SC.wordDot, { backgroundColor: isDeep ? BRAND.success : accent.primary }]} />
+            <Text style={[SC.wordText, { color: isDeep ? BRAND.success : colors.textSecondary }]}>
+              {wordCount} words{isDeep ? ' · Deep Write ✦' : ''}
+            </Text>
+          </View>
+        </View>
+      )}
+    </Reanimated.View>
+  );
+}
+
+function TagChip({ tag, isSelected, onPress, colors }: { tag: typeof TAG_DEFS[0]; isSelected: boolean; onPress: () => void; colors: any }) {
+  const sc = useSharedValue(1);
+  useEffect(() => {}, [isSelected]);
+  const s = useAnimatedStyle(() => ({
+    transform: [{ scale: sc.value }],
+    backgroundColor: isSelected ? tag.color + '22' : colors.surfaceHigh,
+    borderColor: isSelected ? tag.color + 'CC' : colors.border,
+  }));
+  return (
+    <Pressable onPressIn={() => { sc.value = withSpring(0.88, { damping: 15 }); }} onPressOut={() => { sc.value = withSpring(1, { damping: 12 }); }} onPress={onPress}>
+      <Reanimated.View style={[SC.tagChip, s]}>
+        <Text style={{ fontSize: 14 }}>{tag.emoji}</Text>
+        <Text style={[SC.tagLabel, { color: isSelected ? tag.color : colors.textSecondary }]}>{tag.label}</Text>
+      </Reanimated.View>
+    </Pressable>
+  );
+}
+
+function CommitButton({ onPress, disabled, saved, xp, accent, colors }: {
+  onPress: () => void; disabled: boolean; saved: boolean; xp: number; accent: { primary: string; glow: string }; colors: any;
+}) {
+  const progress = useSharedValue(0);
+  const sc = useSharedValue(1);
+  const xpY = useSharedValue(0);
+  const xpOp = useSharedValue(0);
+  const confetti = useMemo(() => Array.from({ length: 28 }), []);
+
+  const triggerTick = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const triggerDone = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    setTimeout(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success), 200);
+  };
+
+  useAnimatedReaction(
+    () => progress.value,
+    (cur, prev) => {
+      if (!prev) return;
+      if (Math.floor(cur * 10) > Math.floor(prev * 10) && cur < 1) runOnJS(triggerTick)();
+    }
+  );
+
+  useEffect(() => {
+    if (saved) {
+      xpY.value = withSpring(-56, { damping: 12, stiffness: 100 });
+      xpOp.value = withSequence(withTiming(1, { duration: 200 }), withDelay(1800, withTiming(0, { duration: 400 })));
+    }
+  }, [saved]);
+
+  const handlePressIn = () => {
+    if (disabled || saved) return;
+    sc.value = withSpring(0.93, { damping: 15 });
+    progress.value = withTiming(1, { duration: 1000, easing: RAEasing.bezier(0.25, 1, 0.5, 1) }, (fin) => {
+      if (fin) { runOnJS(triggerDone)(); runOnJS(onPress)(); }
+    });
+  };
+  const handlePressOut = () => {
+    if (disabled || saved) return;
+    sc.value = withSpring(1, { damping: 15 });
+    if (progress.value < 1) progress.value = withTiming(0, { duration: 300 });
+  };
+
+  const wS = useAnimatedStyle(() => ({ transform: [{ scale: sc.value }] }));
+  const pS = useAnimatedStyle(() => ({ width: `${progress.value * 100}%` as any }));
+  const xpS = useAnimatedStyle(() => ({ transform: [{ translateY: xpY.value }], opacity: xpOp.value }));
+
+  if (saved) {
+    return (
+      <Reanimated.View entering={FadeInDown.springify().damping(18)} style={SC.savedWrap}>
+        <LinearGradient colors={[BRAND.success + 'CC', BRAND.success]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={SC.savedGrad}>
+          <Ionicons name="checkmark-circle" size={22} color="#fff" />
+          <Text style={SC.savedText}>REFLECTION SAVED</Text>
+          <XPBadge xp={xp} />
+        </LinearGradient>
+        <View style={{ position: 'absolute', zIndex: -1 }}>
+          {confetti.map((_, i) => <ConfettiPiece key={i} index={i} trigger={saved} />)}
+        </View>
+      </Reanimated.View>
+    );
+  }
+
+  return (
+    <View style={{ alignItems: 'center', marginVertical: 8 }}>
+      <Reanimated.View style={[{ position: 'absolute', top: -40, zIndex: 100 }, xpS]}>
+        <Text style={{ color: BRAND.success, fontFamily: 'Inter_800ExtraBold', fontSize: 22 }}>+{xp} XP</Text>
+      </Reanimated.View>
+      <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut} disabled={disabled || saved} style={{ width: '100%' }}>
+        <Reanimated.View style={[SC.commitBtn, { backgroundColor: disabled ? colors.surfaceHigh : colors.surfaceMid, borderColor: disabled ? colors.border : accent.primary + '60', opacity: disabled ? 0.5 : 1 }, wS]}>
+          <Reanimated.View style={[SC.commitProg, { backgroundColor: accent.primary + '25' }, pS]} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Ionicons name="finger-print" size={22} color={disabled ? colors.textMuted : accent.primary} />
+            <Text style={[SC.commitText, { color: disabled ? colors.textMuted : colors.foreground }]}>HOLD TO COMMIT</Text>
+          </View>
+        </Reanimated.View>
+      </Pressable>
+    </View>
+  );
+}
+
+function CelebrationModal({ xp, currentLevel, levelProgress, levelMax, onClose }: {
+  xp: number; currentLevel: number; levelProgress: number; levelMax: number; onClose: () => void;
+}) {
+  const colors = useColors();
+  const sc = useSharedValue(0.5);
+  const op = useSharedValue(0);
+  const pw = useSharedValue(0);
+  const confetti = useMemo(() => Array.from({ length: 40 }), []);
+
+  useEffect(() => {
+    sc.value = withSpring(1, { damping: 12, stiffness: 120 });
+    op.value = withTiming(1, { duration: 300 });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const prev = Math.max(0, levelProgress - xp);
+    pw.value = prev / levelMax;
+    pw.value = withDelay(400, withSpring(levelProgress / levelMax, { damping: 15, stiffness: 80 }));
+  }, []);
+
+  const cardS = useAnimatedStyle(() => ({ transform: [{ scale: sc.value }], opacity: op.value }));
+  const bgS = useAnimatedStyle(() => ({ opacity: op.value }));
+  const barS = useAnimatedStyle(() => ({ width: `${pw.value * 100}%` as any }));
+
+  return (
+    <Reanimated.View style={[CM.overlay, bgS]}>
       <View style={{ position: 'absolute', top: '30%', left: '50%' }}>
-        {confettiArray.map((_, i) => (
-          <ConfettiPiece key={i} index={i} trigger={true} />
-        ))}
+        {confetti.map((_, i) => <ConfettiPiece key={i} index={i} trigger={true} />)}
       </View>
-
-      <Reanimated.View style={[
-        celebrationStyles.card, 
-        { backgroundColor: colors.card, borderColor: colors.border },
-        cardStyle
-      ]}>
-        <View style={[celebrationStyles.iconWrap, { backgroundColor: colors.brand.success + '15' }]}>
-          <Ionicons name="sparkles" size={32} color={colors.brand.success} />
+      <Reanimated.View style={[CM.card, { backgroundColor: colors.card, borderColor: colors.border }, cardS]}>
+        <LinearGradient colors={[BRAND.success + '20', 'transparent']} style={StyleSheet.absoluteFill} />
+        <View style={[CM.iconRing, { borderColor: BRAND.success + '40' }]}>
+          <Ionicons name="sparkles" size={32} color={BRAND.success} />
         </View>
-
-        <Text style={[celebrationStyles.title, { color: colors.foreground }]}>
-          Reflection Saved
-        </Text>
-
-        <Text style={[celebrationStyles.sub, { color: colors.mutedForeground }]}>
-          You're strengthening your self-awareness neural pathway. Keep going!
-        </Text>
-
-        <View style={celebrationStyles.rewardRow}>
-          <Text style={[celebrationStyles.xpText, { color: colors.brand.success }]}>
-            +{xp} XP
-          </Text>
-          <Text style={[celebrationStyles.xpSubText, { color: colors.mutedForeground }]}>
-            added to your score
-          </Text>
-        </View>
-
-        <View style={celebrationStyles.levelContainer}>
+        <Text style={[CM.title, { color: colors.foreground }]}>Reflection Saved ✦</Text>
+        <Text style={[CM.sub, { color: colors.textSecondary }]}>You're strengthening your self-awareness pathway. Keep going.</Text>
+        <LinearGradient colors={['#FFD700', '#FFA500']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={CM.xpRow}>
+          <Text style={CM.xpVal}>+{xp} XP</Text>
+          <Text style={CM.xpSub}>added to your score</Text>
+        </LinearGradient>
+        <View style={CM.levelWrap}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-            <Text style={{ fontSize: 11, fontFamily: 'Inter_700Bold', color: colors.textSecondary }}>LVL {currentLevel}</Text>
-            <Text style={{ fontSize: 11, fontFamily: 'Inter_700Bold', color: colors.brand.success }}>{levelProgress}/{levelMax} XP</Text>
+            <Text style={[CM.lvlLabel, { color: colors.textSecondary }]}>LVL {currentLevel}</Text>
+            <Text style={[CM.lvlLabel, { color: BRAND.success }]}>{levelProgress}/{levelMax} XP</Text>
           </View>
-          <View style={[celebrationStyles.barBg, { backgroundColor: colors.surfaceHigh }]}>
-            <Reanimated.View style={[
-              celebrationStyles.barFill, 
-              { backgroundColor: colors.brand.success },
-              barStyle
-            ]} />
+          <View style={[CM.barBg, { backgroundColor: colors.surfaceHigh }]}>
+            <Reanimated.View style={[CM.barFill, { backgroundColor: BRAND.success }, barS]} />
           </View>
         </View>
-
-        <TouchableOpacity
-          onPress={() => {
-            opacity.value = withTiming(0, { duration: 250 }, () => {
-              runOnJS(onClose)();
-            });
-          }}
-          activeOpacity={0.8}
-          style={[celebrationStyles.doneBtn, { backgroundColor: colors.primary }]}
-        >
-          <Text style={celebrationStyles.doneBtnText}>Continue</Text>
+        <TouchableOpacity onPress={() => { op.value = withTiming(0, { duration: 200 }, () => runOnJS(onClose)()); }} activeOpacity={0.85} style={CM.btn}>
+          <LinearGradient colors={[BRAND.primary, BRAND.primaryLight]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={CM.btnInner}>
+            <Text style={CM.btnText}>Continue Journey</Text>
+          </LinearGradient>
         </TouchableOpacity>
       </Reanimated.View>
     </Reanimated.View>
   );
 }
 
-const celebrationStyles = StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 9999,
-    paddingHorizontal: 24,
-  },
-  card: {
-    width: '100%',
-    borderRadius: 24,
-    borderWidth: 1,
-    padding: 24,
-    alignItems: 'center',
-    gap: 16,
-  },
-  iconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  title: {
-    fontSize: 22,
-    fontFamily: 'Inter_700Bold',
-    textAlign: 'center',
-  },
-  sub: {
-    fontSize: 13,
-    fontFamily: 'Inter_400Regular',
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  rewardRow: {
-    alignItems: 'center',
-    gap: 4,
-    marginVertical: 8,
-  },
-  xpText: {
-    fontSize: 28,
-    fontFamily: 'Inter_800ExtraBold',
-  },
-  xpSubText: {
-    fontSize: 12,
-    fontFamily: 'Inter_500Medium',
-  },
-  levelContainer: {
-    width: '100%',
-    marginVertical: 12,
-  },
-  barBg: {
-    height: 8,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  barFill: {
-    height: 8,
-    borderRadius: 4,
-  },
-  doneBtn: {
-    width: '100%',
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  doneBtnText: {
-    fontSize: 14,
-    fontFamily: 'Inter_700Bold',
-    color: '#fff',
-  },
+const CM = StyleSheet.create({
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.88)', justifyContent: 'center', alignItems: 'center', zIndex: 9999, paddingHorizontal: 20 },
+  card: { width: '100%', borderRadius: 28, borderWidth: 1, padding: 28, alignItems: 'center', gap: 16, overflow: 'hidden' },
+  iconRing: { width: 72, height: 72, borderRadius: 36, borderWidth: 2, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  title: { fontSize: 24, fontFamily: 'Inter_800ExtraBold', textAlign: 'center', letterSpacing: -0.5 },
+  sub: { fontSize: 13, fontFamily: 'Inter_400Regular', textAlign: 'center', lineHeight: 19 },
+  xpRow: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 16, alignItems: 'center', gap: 2, marginVertical: 4 },
+  xpVal: { fontSize: 32, fontFamily: 'Inter_800ExtraBold', color: '#000' },
+  xpSub: { fontSize: 11, fontFamily: 'Inter_600SemiBold', color: '#000', opacity: 0.7 },
+  levelWrap: { width: '100%', marginVertical: 4 },
+  lvlLabel: { fontSize: 11, fontFamily: 'Inter_700Bold' },
+  barBg: { height: 8, borderRadius: 4, overflow: 'hidden' },
+  barFill: { height: 8, borderRadius: 4 },
+  btn: { width: '100%', borderRadius: 16, overflow: 'hidden', marginTop: 4 },
+  btnInner: { paddingVertical: 16, alignItems: 'center' },
+  btnText: { fontSize: 15, fontFamily: 'Inter_700Bold', color: '#fff', letterSpacing: 0.3 },
 });
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
+function HistoryCard({ entry, colors, index }: { entry: any; colors: any; index: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const date = new Date(entry.date + 'T12:00:00');
+  const dateLabel = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const tags = entry.tags ?? [];
+  const isWin = tags.includes('win');
+  const isRelapse = tags.includes('relapse');
+  const isDeep = (entry.wordCount ?? 0) >= DEEP_WRITE_THRESHOLD;
+  const ac = isWin ? BRAND.success : isRelapse ? BRAND.danger : isDeep ? BRAND.primary : colors.border;
+
+  return (
+    <Reanimated.View entering={FadeInDown.delay(index * 40).springify().damping(18)}>
+      <TouchableOpacity onPress={() => { setExpanded(e => !e); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} activeOpacity={0.9} style={[HC.card, { backgroundColor: colors.surfaceHigh, borderColor: ac + '50' }]}>
+        <View style={[HC.accentBar, { backgroundColor: ac }]} />
+        <View style={HC.content}>
+          <View style={HC.headerRow}>
+            <View style={{ gap: 3 }}>
+              <Text style={[HC.dateText, { color: colors.foreground }]}>{dateLabel.toUpperCase()}</Text>
+              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                {(entry.wordCount ?? 0) > 0 && <Text style={[HC.metaText, { color: colors.textSecondary }]}>{entry.wordCount} words</Text>}
+                {isDeep && <View style={[HC.deepBadge, { backgroundColor: BRAND.primary + '20' }]}><Text style={{ fontSize: 9, color: BRAND.primary, fontFamily: 'Inter_700Bold', letterSpacing: 1 }}>DEEP WRITE</Text></View>}
+                {isWin && <Text style={{ fontSize: 13 }}>🏆</Text>}
+                {isRelapse && <Text style={{ fontSize: 13 }}>⚠️</Text>}
+              </View>
+            </View>
+            <View style={[HC.chevronBtn, { borderColor: colors.border }]}>
+              <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={colors.textSecondary} />
+            </View>
+          </View>
+          {!expanded && <Text style={[HC.preview, { color: colors.textSecondary }]} numberOfLines={2}>{entry.response}</Text>}
+          {expanded && (
+            <Reanimated.View entering={FadeInDown.duration(200)} style={HC.expandedWrap}>
+              <Text style={[HC.promptLabel, { color: ac }]}>"{entry.prompt}"</Text>
+              <Text style={[HC.fullText, { color: colors.foreground }]}>{entry.response}</Text>
+              {entry.freeResponse ? (
+                <>
+                  <View style={[HC.divider, { backgroundColor: colors.border }]} />
+                  <Text style={[HC.fullText, { color: colors.foreground }]}>{entry.freeResponse}</Text>
+                </>
+              ) : null}
+              {tags.length > 0 && (
+                <View style={HC.tagsRow}>
+                  {tags.map((tagId: string) => {
+                    const def = TAG_DEFS.find(t => t.id === tagId);
+                    if (!def) return null;
+                    return (
+                      <View key={tagId} style={[HC.tagPill, { backgroundColor: def.color + '20', borderColor: def.color + '60' }]}>
+                        <Text style={{ fontSize: 11 }}>{def.emoji}</Text>
+                        <Text style={{ fontSize: 10, color: def.color, fontFamily: 'Inter_700Bold', letterSpacing: 0.5 }}>{def.label.toUpperCase()}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </Reanimated.View>
+          )}
+        </View>
+      </TouchableOpacity>
+    </Reanimated.View>
+  );
+}
+
+const HC = StyleSheet.create({
+  card: { flexDirection: 'row', borderRadius: 16, borderWidth: 1, overflow: 'hidden', marginBottom: 12 },
+  accentBar: { width: 3, minHeight: 72 },
+  content: { flex: 1, padding: 16, gap: 10 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  dateText: { fontSize: 13, fontFamily: 'Inter_800ExtraBold', letterSpacing: 0.5 },
+  metaText: { fontSize: 11, fontFamily: 'Inter_500Medium' },
+  deepBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  chevronBtn: { width: 28, height: 28, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  preview: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 21, opacity: 0.85 },
+  expandedWrap: { gap: 14 },
+  promptLabel: { fontSize: 13, fontFamily: 'Inter_500Medium', fontStyle: 'italic', lineHeight: 19 },
+  fullText: { fontSize: 15, fontFamily: 'Inter_400Regular', lineHeight: 24 },
+  divider: { height: 1, width: 36, marginVertical: 4 },
+  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  tagPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1 },
+});
+
+function Heatmap({ entries, colors }: { entries: any[]; colors: any }) {
+  const today = new Date();
+  const days = Array.from({ length: 28 }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - (27 - i));
+    const ds = d.toISOString().split('T')[0];
+    const entry = entries.find((e: any) => e.date === ds);
+    const isToday = ds === today.toISOString().split('T')[0];
+    return { ds, entry, isToday };
+  });
+  const getColor = (entry: any) => {
+    if (!entry) return colors.surfaceHigh;
+    if (entry.tags?.includes('win')) return BRAND.success;
+    if (entry.tags?.includes('relapse') || entry.tags?.includes('craving')) return BRAND.danger;
+    if ((entry.wordCount ?? 0) >= 50) return BRAND.primary;
+    return BRAND.primaryLight;
+  };
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3 }}>
+      {days.map(({ ds, entry, isToday }) => (
+        <View key={ds} style={{ width: '13.2%', aspectRatio: 1, borderRadius: 4, backgroundColor: getColor(entry), opacity: entry ? 1 : 0.18, borderWidth: isToday ? 2 : 0, borderColor: '#fff', justifyContent: 'center', alignItems: 'center' }}>
+          {isToday && <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: '#fff', opacity: 0.9 }} />}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function InsightStat({ label, value, icon, color, colors, index }: { label: string; value: string; icon: any; color: string; colors: any; index: number }) {
+  return (
+    <Reanimated.View entering={FadeInUp.delay(index * 80).springify().damping(18)} style={[IS.card, { backgroundColor: colors.surfaceHigh, borderColor: color + '30' }]}>
+      <LinearGradient colors={[color + '15', 'transparent']} style={StyleSheet.absoluteFill} />
+      <View style={[IS.iconRing, { backgroundColor: color + '20' }]}>
+        <Ionicons name={icon} size={18} color={color} />
+      </View>
+      <Text style={[IS.val, { color: colors.foreground }]}>{value}</Text>
+      <Text style={[IS.lbl, { color: colors.textSecondary }]}>{label}</Text>
+    </Reanimated.View>
+  );
+}
+
+const IS = StyleSheet.create({
+  card: { width: '47%', borderRadius: 18, borderWidth: 1, padding: 16, alignItems: 'center', gap: 8, overflow: 'hidden' },
+  iconRing: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  val: { fontSize: 26, fontFamily: 'Inter_800ExtraBold', letterSpacing: -1 },
+  lbl: { fontSize: 11, fontFamily: 'Inter_500Medium', textAlign: 'center' },
+});
+
+function TabButton({ label, icon, isActive, onPress, colors }: { label: string; icon: string; isActive: boolean; onPress: () => void; colors: any }) {
+  const sc = useSharedValue(1);
+  const s = useAnimatedStyle(() => ({
+    backgroundColor: isActive ? BRAND.primary + '20' : 'transparent',
+    transform: [{ scale: sc.value }],
+  }));
+  return (
+    <Pressable onPressIn={() => { sc.value = withSpring(0.93, { damping: 15 }); }} onPressOut={() => { sc.value = withSpring(1, { damping: 12 }); }} onPress={onPress} style={{ flex: 1 }}>
+      <Reanimated.View style={[SC.tabBtn, s]}>
+        <Ionicons name={icon as any} size={14} color={isActive ? BRAND.primary : colors.textSecondary} />
+        <Text style={[SC.tabText, { color: isActive ? BRAND.primary : colors.textSecondary }]}>{label}</Text>
+      </Reanimated.View>
+    </Pressable>
+  );
+}
 
 export default function JournalScreen() {
   const colors = useColors();
@@ -630,13 +595,13 @@ export default function JournalScreen() {
   const {
     profile, addJournalEntry, getJournalEntryForDate, journalEntries,
     addXP, currentLevel, availablePrograms, weekTaskProgress, isWeekTaskComplete,
-    getWeekGatingStatus, levelProgress, levelMax
+    getWeekGatingStatus, levelProgress, levelMax,
   } = useApp();
+
   const today = new Date().toISOString().split('T')[0];
   const existing = getJournalEntryForDate(today);
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
 
-  // ─── Weekly reflection detection ───────────────────────────────────────────
   const isSunday = new Date().getDay() === 0;
   const primaryProgramId = profile.activeProgramIds?.[0];
   const prog = primaryProgramId ? availablePrograms.find(p => p.id === primaryProgramId) : null;
@@ -646,50 +611,40 @@ export default function JournalScreen() {
   const isWeeklyReflectionDay = isSunday || isWeekEnd;
 
   const weeklyReflectionPrompt = useMemo(() => {
-    if (!prog || !progress) return "Looking back at this week — what did you learn about yourself?";
+    if (!prog || !progress) return 'Looking back at this week — what did you learn about yourself?';
     const weekData = prog.weeks[progress.currentWeek - 1];
-    return (weekData as any)?.weeklyReflectionPrompt
-      ?? "Looking back at this week — what patterns did you notice? What would you do differently?";
+    return (weekData as any)?.weeklyReflectionPrompt ?? 'Looking back at this week — what patterns did you notice?';
   }, [prog, progress]);
 
-  // Determine today's program context
   const { primaryPrompt, missedTasks, hitTasks, programWeek, programName } = useMemo(() => {
-    const primaryProgramId = profile.activeProgramIds?.[0];
-    const prog = primaryProgramId ? availablePrograms.find(p => p.id === primaryProgramId) : null;
-    const progress = primaryProgramId ? profile.programProgress[primaryProgramId] : null;
-
-    let prompt = "What is one small choice you can make today to align with your values?";
+    const pid = profile.activeProgramIds?.[0];
+    const p = pid ? availablePrograms.find(x => x.id === pid) : null;
+    const pr = pid ? profile.programProgress[pid] : null;
+    let prompt = 'What is one small choice you can make today to align with your values?';
     let week = profile.currentWeek ?? 1;
     let name = '';
     const missed: string[] = [];
     const hit: string[] = [];
-
-    if (prog && progress) {
-      week = progress.currentWeek;
-      name = prog.title;
-      const weekData = prog.weeks[progress.currentWeek - 1];
+    if (p && pr) {
+      week = pr.currentWeek; name = p.title;
+      const weekData = p.weeks[pr.currentWeek - 1];
       if (weekData) {
-        if ((weekData as any).dailyJournalPrompt) {
-          prompt = (weekData as any).dailyJournalPrompt;
-        } else {
-          const prompts = DAILY_JOURNAL_PROMPTS[progress.currentWeek];
-          if (prompts?.length > 0) prompt = prompts[new Date().getDay() % prompts.length];
-        }
+        if ((weekData as any).dailyJournalPrompt) { prompt = (weekData as any).dailyJournalPrompt; }
+        else { const prompts = DAILY_JOURNAL_PROMPTS[pr.currentWeek]; if (prompts?.length > 0) prompt = prompts[new Date().getDay() % prompts.length]; }
         weekData.tasks.forEach(task => {
-          const complete = isWeekTaskComplete(progress.currentWeek, task.id, primaryProgramId!);
-          if (complete) hit.push(task.title);
+          if (isWeekTaskComplete(pr.currentWeek, task.id, pid!)) hit.push(task.title);
           else missed.push(task.title);
         });
       }
     }
-
     return { primaryPrompt: prompt, missedTasks: missed, hitTasks: hit, programWeek: week, programName: name };
   }, [profile, availablePrograms, weekTaskProgress]);
 
-  const dynamicPrompts = useMemo(
-    () => buildDynamicPrompts(primaryPrompt, missedTasks, hitTasks),
-    [primaryPrompt, missedTasks, hitTasks]
-  );
+  const dynamicPrompts = useMemo(() => buildDynamicPrompts(primaryPrompt, missedTasks, hitTasks), [primaryPrompt, missedTasks, hitTasks]);
+
+  const programAccent = PROGRAM_ACCENTS[
+    Math.abs(profile.activeProgramIds?.[0]?.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) ?? 0) % PROGRAM_ACCENTS.length
+  ] ?? PROGRAM_ACCENTS[0];
 
   const [selectedTags, setSelectedTags] = useState<string[]>(existing?.tags ?? []);
   const [showCelebration, setShowCelebration] = useState(false);
@@ -697,55 +652,38 @@ export default function JournalScreen() {
   const [response, setResponse] = useState(existing?.response ?? '');
   const [freeResponse, setFreeResponse] = useState(existing?.freeResponse ?? '');
   const [saved, setSaved] = useState(!!existing);
-  const [activeTab, setActiveTab] = useState<'today' | 'history' | 'insights'>('today');
+  const [activeTab, setActiveTab] = useState<'write' | 'history' | 'insights'>('write');
   const [wordCount, setWordCount] = useState(existing?.wordCount ?? 0);
   const [showFreeWrite, setShowFreeWrite] = useState(!!existing?.freeResponse);
+  const [editorFocused, setEditorFocused] = useState(false);
+  const [freeEditorFocused, setFreeEditorFocused] = useState(false);
 
   const handleTextChange = (text: string) => {
-    setResponse(text);
-    setSaved(false);
-    const wc = [...text.trim().split(/\s+/), ...freeResponse.trim().split(/\s+/)].filter(w => w.length > 0).length;
-    setWordCount(wc);
+    setResponse(text); setSaved(false);
+    setWordCount([...text.trim().split(/\s+/), ...freeResponse.trim().split(/\s+/)].filter(w => w.length > 0).length);
   };
-
   const handleFreeChange = (text: string) => {
-    setFreeResponse(text);
-    setSaved(false);
-    const wc = [...response.trim().split(/\s+/), ...text.trim().split(/\s+/)].filter(w => w.length > 0).length;
-    setWordCount(wc);
+    setFreeResponse(text); setSaved(false);
+    setWordCount([...response.trim().split(/\s+/), ...text.trim().split(/\s+/)].filter(w => w.length > 0).length);
   };
 
   const handleSave = async () => {
     if (!response.trim()) return;
-    const missedTaskIds = missedTasks.map((_, i) => `missed-${i}`);
-    const hitTaskIds = hitTasks.map((_, i) => `hit-${i}`);
-    await addJournalEntry({
-      date: today,
-      prompt: isWeeklyReflectionDay ? weeklyReflectionPrompt : dynamicPrompts[activePromptIdx],
-      response: response.trim(),
-      programContext: { missedTaskIds, hitTaskIds, programId: profile.activeProgramIds?.[0] },
-      isWeeklyReflection: isWeeklyReflectionDay,
-    }, freeResponse.trim() || undefined, selectedTags);
-    const isNew = !existing;
-    if (isNew) {
-      await addXP(DAILY_JOURNAL_XP + (wordCount >= 50 ? WORD_COUNT_BONUS_XP : 0));
-    }
-    setSaved(true);
-    setShowCelebration(true);
+    await addJournalEntry(
+      { date: today, prompt: isWeeklyReflectionDay ? weeklyReflectionPrompt : dynamicPrompts[activePromptIdx], response: response.trim(), programContext: { missedTaskIds: missedTasks.map((_, i) => `missed-${i}`), hitTaskIds: hitTasks.map((_, i) => `hit-${i}`), programId: profile.activeProgramIds?.[0] }, isWeeklyReflection: isWeeklyReflectionDay },
+      freeResponse.trim() || undefined, selectedTags
+    );
+    if (!existing) await addXP(DAILY_JOURNAL_XP + (wordCount >= DEEP_WRITE_THRESHOLD ? WORD_COUNT_BONUS_XP : 0));
+    setSaved(true); setShowCelebration(true);
   };
 
-  const recentEntries = useMemo(
-    () => [...journalEntries].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30),
-    [journalEntries]
-  );
+  const recentEntries = useMemo(() => [...journalEntries].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30), [journalEntries]);
 
   const journalStreak = useMemo(() => {
-    let streak = 0;
-    const d = new Date();
+    let streak = 0; const d = new Date();
     while (true) {
       const ds = d.toISOString().split('T')[0];
-      if (journalEntries.some(e => e.date === ds)) { streak++; d.setDate(d.getDate() - 1); }
-      else break;
+      if (journalEntries.some(e => e.date === ds)) { streak++; d.setDate(d.getDate() - 1); } else break;
     }
     return streak;
   }, [journalEntries]);
@@ -756,397 +694,390 @@ export default function JournalScreen() {
     return counts;
   }, [journalEntries]);
 
-  const totalWords = useMemo(
-    () => journalEntries.reduce((sum, e) => sum + (e.wordCount ?? 0), 0),
-    [journalEntries]
+  const totalWords = useMemo(() => journalEntries.reduce((sum, e) => sum + (e.wordCount ?? 0), 0), [journalEntries]);
+  const deepWrites = useMemo(() => journalEntries.filter(e => (e.wordCount ?? 0) >= DEEP_WRITE_THRESHOLD).length, [journalEntries]);
+
+  const xpToEarn = DAILY_JOURNAL_XP + (wordCount >= DEEP_WRITE_THRESHOLD ? WORD_COUNT_BONUS_XP : 0);
+  const currentPrompt = isWeeklyReflectionDay ? weeklyReflectionPrompt : dynamicPrompts[activePromptIdx];
+  const isDynamic = !isWeeklyReflectionDay && dynamicPrompts.length > 1;
+
+  const activeProgs = useMemo(() =>
+    (profile.activeProgramIds ?? []).map((id, idx) => {
+      const p = availablePrograms.find(x => x.id === id);
+      if (!p) return null;
+      return { ...p, progProgress: profile.programProgress[id], accent: PROGRAM_ACCENTS[idx % PROGRAM_ACCENTS.length] };
+    }).filter(Boolean),
+    [profile.activeProgramIds, availablePrograms, profile.programProgress]
   );
 
-  const currentPrompt = dynamicPrompts[activePromptIdx];
-  const isDynamic = dynamicPrompts.length > 1;
+  const scrollY = useSharedValue(0);
+  const headerAnimS = useAnimatedStyle(() => ({ shadowOpacity: interpolate(scrollY.value, [0, 40], [0, 0.4], 'clamp') }));
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: topPadding + 12, borderBottomColor: colors.border }]}>
-        <View style={styles.titleRow}>
-          <Text style={[styles.title, { color: colors.foreground }]}>Journal</Text>
-          <View style={styles.headerRight}>
-            <View style={[styles.levelBadge, { backgroundColor: colors.primary }]}>
-              <Text style={styles.levelBadgeText}>LVL {currentLevel}</Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => router.push('/calendar')}
-              style={[styles.iconBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+    <View style={[SC.root, { backgroundColor: colors.background }]}>
+      <LinearGradient colors={[programAccent.primary + '18', 'transparent']} style={SC.heroGrad} pointerEvents="none" />
+
+      <Reanimated.View style={[SC.header, { paddingTop: topPadding + 8, borderBottomColor: colors.border }, headerAnimS]}>
+        {/* Title row */}
+        <View style={SC.titleRow}>
+          <View style={{ gap: 2 }}>
+            <Text style={[SC.titleLabel, { color: colors.textSecondary }]}>
+              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()}
+            </Text>
+            <Text style={[SC.title, { color: colors.foreground }]}>Journal</Text>
+          </View>
+          <View style={SC.headerActions}>
+            <StreakRing streak={journalStreak} colors={colors} />
+            <LinearGradient colors={[BRAND.primary, BRAND.primaryLight]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={SC.levelBadge}>
+              <Text style={SC.levelBadgeText}>LVL {currentLevel}</Text>
+            </LinearGradient>
+            <TouchableOpacity onPress={() => router.push('/calendar')} style={[SC.iconBtn, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]} activeOpacity={0.7}>
+              <Ionicons name="calendar-outline" size={17} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Stats bar */}
-        <View style={[styles.statsBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={styles.statItem}>
-            <Ionicons name="flame" size={14} color={journalStreak > 0 ? '#f59e0b' : colors.mutedForeground} />
-            <Text style={[styles.statText, { color: journalStreak > 0 ? '#f59e0b' : colors.mutedForeground }]}>
-              {journalStreak}d streak
-            </Text>
+        {/* XP Bar */}
+        <View style={SC.xpBarWrap}>
+          <View style={[SC.xpBarBg, { backgroundColor: colors.surfaceHigh }]}>
+            <LinearGradient colors={[BRAND.primary, BRAND.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[SC.xpBarFill, { width: `${(levelProgress / levelMax) * 100}%` as any }]} />
           </View>
-          <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-          <View style={styles.statItem}>
-            <Ionicons name="book" size={14} color={colors.primary} />
-            <Text style={[styles.statText, { color: colors.foreground }]}>{journalEntries.length} entries</Text>
-          </View>
-          <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-          <View style={styles.statItem}>
-            <Ionicons name="create-outline" size={14} color={colors.accent} />
-            <Text style={[styles.statText, { color: colors.foreground }]}>{(totalWords / 1000).toFixed(1)}k words</Text>
-          </View>
+          <Text style={[SC.xpBarText, { color: colors.textSecondary }]}>{levelProgress}/{levelMax} XP</Text>
         </View>
+
+        {/* Active program pills */}
+        {activeProgs.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -20, paddingHorizontal: 20 }}>
+            {activeProgs.map((p: any, idx) => (
+              <Reanimated.View key={p.id} entering={FadeIn.delay(idx * 100)} style={[SC.progPill, { borderColor: p.accent.primary + '50', backgroundColor: p.accent.primary + '10' }]}>
+                <PulsingDot color={p.accent.primary} />
+                <Text style={[SC.progPillText, { color: p.accent.primary }]} numberOfLines={1}>{p.title}</Text>
+                <Text style={[SC.progPillWeek, { color: p.accent.primary + 'AA' }]}>W{p.progProgress?.currentWeek ?? 1}</Text>
+              </Reanimated.View>
+            ))}
+          </ScrollView>
+        )}
 
         {/* Tabs */}
-        <View style={[styles.tabRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          {(['today', 'history', 'insights'] as const).map(tab => (
-            <TouchableOpacity
-              key={tab}
-              onPress={() => { setActiveTab(tab); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-              style={[styles.tabBtn, { backgroundColor: activeTab === tab ? colors.primary : 'transparent' }]}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.tabBtnText, { color: activeTab === tab ? '#fff' : colors.mutedForeground }]}>
-                {tab === 'today' ? 'Today' : tab === 'history' ? 'History' : 'Insights'}
-              </Text>
-            </TouchableOpacity>
-          ))}
+        <View style={[SC.tabRow, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}>
+          <TabButton label="Write" icon="create-outline" isActive={activeTab === 'write'} onPress={() => { setActiveTab('write'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} colors={colors} />
+          <TabButton label="History" icon="time-outline" isActive={activeTab === 'history'} onPress={() => { setActiveTab('history'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} colors={colors} />
+          <TabButton label="Insights" icon="analytics-outline" isActive={activeTab === 'insights'} onPress={() => { setActiveTab('insights'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} colors={colors} />
         </View>
-      </View>
+      </Reanimated.View>
 
-      {/* ── TODAY tab ── */}
-      {activeTab === 'today' && (
-        <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: Platform.OS === 'web' ? 120 : 100 }]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* Dynamic Prompt Card — or Weekly Reflection */}
-          {isWeeklyReflectionDay ? (
-            <View style={[styles.promptCard, { backgroundColor: '#a855f712', borderColor: '#a855f730' }]}>
-              <View style={styles.promptBadgeRow}>
-                <View style={[styles.promptBadge, { backgroundColor: '#a855f725' }]}>
-                  <Text style={[styles.promptBadgeText, { color: '#a855f7' }]}>🌀 Weekly Reflection</Text>
-                </View>
-                {prog && progress && (
-                  <Text style={{ fontSize: 11, fontFamily: 'Inter_500Medium', color: '#a855f7', marginLeft: 'auto' }}>
-                    Week {progress.currentWeek}
+      {/* ── WRITE TAB ── */}
+      {activeTab === 'write' && (
+        <ScrollView contentContainerStyle={[SC.content, { paddingBottom: Platform.OS === 'web' ? 120 : 110 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <PromptCard prompt={currentPrompt} accent={programAccent} programName={programName || 'Daily Reflection'} programWeek={programWeek} isWeekly={isWeeklyReflectionDay} isDynamic={isDynamic} promptIndex={activePromptIdx} totalPrompts={dynamicPrompts.length} onNext={() => setActivePromptIdx(i => Math.min(i + 1, dynamicPrompts.length - 1))} onPrev={() => setActivePromptIdx(i => Math.max(i - 1, 0))} colors={colors} />
+
+          {(missedTasks.length > 0 || hitTasks.length >= 3) && (
+            <Reanimated.View entering={FadeInDown.duration(300)} style={{ gap: 8 }}>
+              {missedTasks.length > 0 && (
+                <View style={[SC.alertChip, { backgroundColor: BRAND.danger + '15', borderColor: BRAND.danger + '40' }]}>
+                  <Ionicons name="alert-circle" size={14} color={BRAND.danger} />
+                  <Text style={[SC.alertText, { color: colors.textSecondary }]}>
+                    <Text style={{ color: BRAND.danger, fontFamily: 'Inter_700Bold' }}>Missed: </Text>
+                    {missedTasks.slice(0, 2).join(', ')}{missedTasks.length > 2 ? ` +${missedTasks.length - 2}` : ''}
                   </Text>
-                )}
-              </View>
-              <Text style={[styles.promptText, { color: colors.foreground }]}>{weeklyReflectionPrompt}</Text>
-              <View style={[styles.contextAlert, { backgroundColor: '#a855f712', borderColor: '#a855f730' }]}>
-                <Text style={{ fontSize: 14 }}>🌟</Text>
-                <Text style={[styles.contextAlertText, { color: '#a855f7' }]}>
-                  Sunday reflection — look back at your whole week with compassion
-                </Text>
-              </View>
-            </View>
+                </View>
+              )}
+              {hitTasks.length >= 3 && (
+                <View style={[SC.alertChip, { backgroundColor: BRAND.success + '15', borderColor: BRAND.success + '40' }]}>
+                  <Ionicons name="checkmark-circle" size={14} color={BRAND.success} />
+                  <Text style={[SC.alertText, { color: colors.textSecondary }]}>
+                    <Text style={{ color: BRAND.success, fontFamily: 'Inter_700Bold' }}>Crushed it: </Text>
+                    Completed {hitTasks.length} protocol tasks today.
+                  </Text>
+                </View>
+              )}
+            </Reanimated.View>
+          )}
+
+          <View style={SC.sectionLabel}>
+            <View style={[SC.sectionLine, { backgroundColor: programAccent.primary }]} />
+            <Text style={[SC.sectionLabelText, { color: colors.textSecondary }]}>YOUR REFLECTION</Text>
+          </View>
+
+          <WritingEditor value={response} onChangeText={handleTextChange} placeholder="Start writing… be honest with yourself." colors={colors} accent={programAccent} wordCount={wordCount} isFocused={editorFocused} onFocus={() => setEditorFocused(true)} onBlur={() => setEditorFocused(false)} />
+
+          {!showFreeWrite ? (
+            <TouchableOpacity onPress={() => setShowFreeWrite(true)} activeOpacity={0.7} style={SC.freeToggle}>
+              <Ionicons name="add-circle-outline" size={16} color={programAccent.primary} />
+              <Text style={[SC.freeToggleText, { color: programAccent.primary }]}>Add Free Write</Text>
+            </TouchableOpacity>
           ) : (
-          <View style={[styles.promptCard, { backgroundColor: colors.accent + '12', borderColor: colors.accent + '30' }]}>
-            <View style={styles.promptBadgeRow}>
-              <View style={[styles.promptBadge, { backgroundColor: colors.accent + '25' }]}>
-                <Text style={[styles.promptBadgeText, { color: colors.accent }]}>
-                  {programName ? `${programName} · Week ${programWeek}` : `Week ${programWeek} Prompt`}
-                </Text>
+            <Reanimated.View entering={FadeInDown.duration(250)}>
+              <View style={SC.sectionLabel}>
+                <View style={[SC.sectionLine, { backgroundColor: colors.border }]} />
+                <Text style={[SC.sectionLabelText, { color: colors.textSecondary }]}>FREE WRITE</Text>
               </View>
-              {isDynamic && (
-                <View style={styles.promptNav}>
-                  {dynamicPrompts.map((_, i) => (
-                    <TouchableOpacity
-                      key={i} onPress={() => { setActivePromptIdx(i); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                      style={[styles.promptNavDot, {
-                        backgroundColor: activePromptIdx === i ? colors.accent : colors.border,
-                        width: activePromptIdx === i ? 18 : 6,
-                      }]}
-                    />
+              <WritingEditor value={freeResponse} onChangeText={handleFreeChange} placeholder="No prompt. Just your thoughts flowing freely…" colors={colors} accent={{ primary: colors.textSecondary, glow: 'transparent' }} isFocused={freeEditorFocused} onFocus={() => setFreeEditorFocused(true)} onBlur={() => setFreeEditorFocused(false)} />
+            </Reanimated.View>
+          )}
+
+          <View style={{ gap: 12 }}>
+            <View style={SC.sectionLabel}>
+              <View style={[SC.sectionLine, { backgroundColor: colors.border }]} />
+              <Text style={[SC.sectionLabelText, { color: colors.textSecondary }]}>HOW ARE YOU FEELING?</Text>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {TAG_DEFS.map(tag => (
+                <TagChip key={tag.id} tag={tag} isSelected={selectedTags.includes(tag.id)} onPress={() => { setSelectedTags(prev => prev.includes(tag.id) ? prev.filter(t => t !== tag.id) : [...prev, tag.id]); setSaved(false); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} colors={colors} />
+              ))}
+            </View>
+          </View>
+
+          {!saved && response.trim().length > 0 && (
+            <Reanimated.View entering={FadeInDown.duration(300)} style={[SC.xpPreview, { borderColor: programAccent.primary + '30', backgroundColor: programAccent.primary + '08' }]}>
+              <Ionicons name="star-outline" size={14} color={programAccent.primary} />
+              <Text style={[SC.xpPreviewText, { color: programAccent.primary }]}>
+                Save to earn <Text style={{ fontFamily: 'Inter_800ExtraBold' }}>+{xpToEarn} XP</Text>
+                {wordCount >= DEEP_WRITE_THRESHOLD ? ' (Deep Write bonus ✦)' : ''}
+              </Text>
+            </Reanimated.View>
+          )}
+
+          <CommitButton onPress={handleSave} disabled={!response.trim() || saved} saved={saved} xp={xpToEarn} accent={programAccent} colors={colors} />
+        </ScrollView>
+      )}
+
+      {/* ── HISTORY TAB ── */}
+      {activeTab === 'history' && (
+        <ScrollView contentContainerStyle={[SC.content, { paddingBottom: Platform.OS === 'web' ? 120 : 110 }]} showsVerticalScrollIndicator={false}>
+          {recentEntries.length === 0 ? (
+            <Reanimated.View entering={FadeInUp.duration(400)} style={SC.emptyState}>
+              <Text style={{ fontSize: 52, marginBottom: 12 }}>📖</Text>
+              <Text style={[SC.emptyTitle, { color: colors.foreground }]}>No entries yet</Text>
+              <Text style={[SC.emptySub, { color: colors.textSecondary }]}>Start writing today to build your reflection journal</Text>
+            </Reanimated.View>
+          ) : (
+            <>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <Text style={[SC.historyCount, { color: colors.foreground }]}>{recentEntries.length} Entries</Text>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  {[{ color: BRAND.success, label: 'Win' }, { color: BRAND.primary, label: 'Deep' }, { color: BRAND.danger, label: 'Relapse' }].map(l => (
+                    <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: l.color }} />
+                      <Text style={{ fontSize: 11, color: colors.textSecondary, fontFamily: 'Inter_500Medium' }}>{l.label}</Text>
+                    </View>
                   ))}
                 </View>
-              )}
-            </View>
-            <Text style={[styles.promptText, { color: colors.foreground }]}>{currentPrompt}</Text>
-
-            {/* Missed/hit task context */}
-            {missedTasks.length > 0 && (
-              <View style={[styles.contextAlert, { backgroundColor: '#ef444412', borderColor: '#ef444430' }]}>
-                <Ionicons name="warning-outline" size={14} color="#ef4444" />
-                <Text style={styles.contextAlertText} numberOfLines={1}>
-                  Missed: {missedTasks.slice(0, 2).join(', ')}
-                  {missedTasks.length > 2 ? ` +${missedTasks.length - 2}` : ''}
-                </Text>
               </View>
-            )}
-            {hitTasks.length >= 3 && (
-              <View style={[styles.contextAlert, { backgroundColor: '#22c55e12', borderColor: '#22c55e30' }]}>
-                <Ionicons name="checkmark-circle-outline" size={14} color="#22c55e" />
-                <Text style={[styles.contextAlertText, { color: '#22c55e' }]}>
-                  Crushed {hitTasks.length} tasks today 🔥
-                </Text>
-              </View>
-            )}
-          </View>
-          )}
-
-          {/* Primary Response */}
-          <View style={[styles.editorWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.editorLabel, { color: colors.mutedForeground }]}>YOUR REFLECTION</Text>
-            <TextInput
-              value={response}
-              onChangeText={handleTextChange}
-              placeholder="Write your thoughts here… be honest with yourself."
-              placeholderTextColor={colors.mutedForeground + '80'}
-              multiline
-              style={[styles.editorInput, { color: colors.foreground }]}
-            />
-            <View style={styles.editorMeta}>
-              <Text style={[styles.wordCountText, { color: wordCount >= 50 ? colors.accent : colors.mutedForeground }]}>
-                {wordCount} words {wordCount >= 50 ? '✨ Bonus XP earned' : `· ${Math.max(0, 50 - wordCount)} for bonus`}
-              </Text>
-              {!showFreeWrite && (
-                <TouchableOpacity onPress={() => setShowFreeWrite(true)} activeOpacity={0.7}>
-                  <Text style={[styles.freeWriteToggle, { color: colors.primary }]}>+ Free write</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-
-          {/* Free Write Section */}
-          {showFreeWrite && (
-            <View style={[styles.editorWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={styles.freeWriteHeader}>
-                <Text style={[styles.editorLabel, { color: colors.mutedForeground }]}>FREE REFLECTION</Text>
-                <Text style={[styles.editorLabelSub, { color: colors.mutedForeground }]}>No prompt — just your thoughts</Text>
-              </View>
-              <TextInput
-                value={freeResponse}
-                onChangeText={handleFreeChange}
-                placeholder="Anything else on your mind today..."
-                placeholderTextColor={colors.mutedForeground + '80'}
-                multiline
-                style={[styles.editorInput, { color: colors.foreground, minHeight: 100 }]}
-              />
-            </View>
-          )}
-
-          {/* Tag Selector */}
-          <View style={{ gap: 8, marginTop: 10, marginBottom: 14 }}>
-            <Text style={[styles.editorLabel, { color: colors.mutedForeground, paddingHorizontal: 0, paddingTop: 0 }]}>
-              ADD TAGS (HOW ARE YOU FEELING TODAY?)
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {TAG_DEFS.map(tag => {
-                const isSelected = selectedTags.includes(tag.id);
-                return (
-                  <TouchableOpacity
-                    key={tag.id}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      setSelectedTags(prev =>
-                        prev.includes(tag.id) ? prev.filter(t => t !== tag.id) : [...prev, tag.id]
-                      );
-                      setSaved(false);
-                    }}
-                    activeOpacity={0.8}
-                    style={[
-                      styles.tagChip,
-                      {
-                        backgroundColor: isSelected ? tag.color + '20' : colors.card,
-                        borderColor: isSelected ? tag.color : colors.border,
-                        borderWidth: 1,
-                      }
-                    ]}
-                  >
-                    <Text style={{ fontSize: 13 }}>{tag.emoji}</Text>
-                    <Text style={[
-                      styles.tagChipLabel,
-                      { color: isSelected ? colors.foreground : colors.mutedForeground }
-                    ]}>
-                      {tag.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-
-          {/* Save */}
-          <PremiumSaveButton
-            onPress={handleSave}
-            disabled={!response.trim() || saved}
-            saved={saved}
-            xp={DAILY_JOURNAL_XP + (wordCount >= 50 ? WORD_COUNT_BONUS_XP : 0)}
-            colors={colors}
-          />
-        </ScrollView>
-      )}
-
-      {/* ── HISTORY tab ── */}
-      {activeTab === 'history' && (
-        <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: Platform.OS === 'web' ? 120 : 100 }]}
-          showsVerticalScrollIndicator={false}
-        >
-          {recentEntries.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={{ fontSize: 40 }}>📖</Text>
-              <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No entries yet</Text>
-              <Text style={[styles.emptySub, { color: colors.mutedForeground }]}>
-                Start writing today to build your journal streak
-              </Text>
-            </View>
-          ) : (
-            recentEntries.map(entry => (
-              <EntryCard key={entry.id} entry={entry} colors={colors} />
-            ))
+              {recentEntries.map((entry, idx) => <HistoryCard key={entry.id} entry={entry} colors={colors} index={idx} />)}
+            </>
           )}
         </ScrollView>
       )}
 
-      {/* ── INSIGHTS tab ── */}
+      {/* ── INSIGHTS TAB ── */}
       {activeTab === 'insights' && (
-        <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: Platform.OS === 'web' ? 120 : 100 }]}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* 28-day heatmap */}
-          <View style={[styles.insightCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.insightCardHeader}>
-              <Ionicons name="calendar" size={16} color={colors.primary} />
-              <Text style={[styles.insightCardTitle, { color: colors.foreground }]}>28-Day Writing Map</Text>
-            </View>
-            <Text style={[styles.insightCardSub, { color: colors.mutedForeground }]}>
-              🟢 Win · 🔴 Relapse · 🔵 Deep write · ⬜ No entry
-            </Text>
-            <MoodHeatmap entries={journalEntries} colors={colors} />
-          </View>
-
-          {/* Stats grid */}
-          <View style={styles.statsGrid}>
+        <ScrollView contentContainerStyle={[SC.content, { paddingBottom: Platform.OS === 'web' ? 120 : 110 }]} showsVerticalScrollIndicator={false}>
+          <View style={SC.statsGrid}>
             {[
-              { label: 'Streak', value: `${journalStreak}d`, icon: 'flame', color: '#f59e0b' },
-              { label: 'Entries', value: `${journalEntries.length}`, icon: 'book', color: colors.primary },
-              { label: 'Total Words', value: `${totalWords.toLocaleString()}`, icon: 'create-outline', color: colors.accent },
-              { label: 'Deep Writes', value: `${journalEntries.filter(e => (e.wordCount ?? 0) >= 50).length}`, icon: 'star', color: '#22c55e' },
-            ].map(stat => (
-              <View key={stat.label} style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Ionicons name={stat.icon as any} size={20} color={stat.color} />
-                <Text style={[styles.statCardVal, { color: colors.foreground }]}>{stat.value}</Text>
-                <Text style={[styles.statCardLabel, { color: colors.mutedForeground }]}>{stat.label}</Text>
-              </View>
-            ))}
+              { label: 'Day Streak', value: `${journalStreak}`, icon: 'flame', color: '#f59e0b' },
+              { label: 'Total Entries', value: `${journalEntries.length}`, icon: 'book', color: BRAND.primary },
+              { label: 'Words Written', value: totalWords > 999 ? `${(totalWords / 1000).toFixed(1)}k` : `${totalWords}`, icon: 'create-outline', color: BRAND.secondary },
+              { label: 'Deep Writes', value: `${deepWrites}`, icon: 'star', color: BRAND.success },
+            ].map((stat, idx) => <InsightStat key={stat.label} label={stat.label} value={stat.value} icon={stat.icon as any} color={stat.color} colors={colors} index={idx} />)}
           </View>
 
-          {/* Recurring themes */}
-          {Object.keys(tagCounts).length > 0 && (
-            <View style={[styles.insightCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={styles.insightCardHeader}>
-                <Ionicons name="pricetags" size={16} color={colors.primary} />
-                <Text style={[styles.insightCardTitle, { color: colors.foreground }]}>Recurring Themes</Text>
-              </View>
-              <Text style={[styles.insightCardSub, { color: colors.mutedForeground }]}>
-                Auto-detected from your writing — bigger = more frequent
-              </Text>
-              <TagCloud tagCounts={tagCounts} total={journalEntries.length} colors={colors} />
+          <Reanimated.View entering={FadeInUp.delay(200).springify()} style={[SC.insightCard, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="grid-outline" size={16} color={BRAND.primary} />
+              <Text style={[SC.insightTitle, { color: colors.foreground }]}>28-Day Writing Map</Text>
             </View>
+            <View style={{ flexDirection: 'row', gap: 14, flexWrap: 'wrap' }}>
+              {[{ color: BRAND.success, label: 'Win' }, { color: BRAND.primary, label: 'Deep' }, { color: BRAND.primaryLight, label: 'Written' }, { color: BRAND.danger, label: 'Relapse' }].map(l => (
+                <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: l.color }} />
+                  <Text style={{ fontSize: 10, color: colors.textSecondary, fontFamily: 'Inter_500Medium' }}>{l.label}</Text>
+                </View>
+              ))}
+            </View>
+            <Heatmap entries={journalEntries} colors={colors} />
+          </Reanimated.View>
+
+          {activeProgs.length > 0 && (
+            <Reanimated.View entering={FadeInUp.delay(300).springify()}>
+              <View style={SC.sectionLabel}>
+                <View style={[SC.sectionLine, { backgroundColor: BRAND.primary }]} />
+                <Text style={[SC.sectionLabelText, { color: colors.textSecondary }]}>ACTIVE PROGRAM JOURNALS</Text>
+              </View>
+              <View style={{ gap: 10 }}>
+                {activeProgs.map((p: any, idx) => {
+                  const progEntries = journalEntries.filter(e => e.programContext?.programId === p.id);
+                  return (
+                    <Reanimated.View key={p.id} entering={FadeInDown.delay(idx * 80).springify()} style={[SC.progJournalCard, { backgroundColor: colors.surfaceHigh, borderColor: p.accent.primary + '40' }]}>
+                      <LinearGradient colors={[p.accent.primary + '12', 'transparent']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+                      <View style={[SC.progJournalBar, { backgroundColor: p.accent.primary }]} />
+                      <View style={{ flex: 1, gap: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <PulsingDot color={p.accent.primary} />
+                          <Text style={[SC.progJournalName, { color: p.accent.primary }]} numberOfLines={1}>{p.title}</Text>
+                          <View style={[SC.weekBadge, { backgroundColor: p.accent.primary + '20' }]}>
+                            <Text style={[SC.weekBadgeText, { color: p.accent.primary }]}>WEEK {p.progProgress?.currentWeek ?? 1}</Text>
+                          </View>
+                        </View>
+                        <Text style={[SC.progJournalStat, { color: colors.textSecondary }]}>{progEntries.length} entries in this program</Text>
+                      </View>
+                      <Ionicons name="journal-outline" size={20} color={p.accent.primary + '80'} />
+                    </Reanimated.View>
+                  );
+                })}
+              </View>
+            </Reanimated.View>
           )}
 
-          {/* Writing frequency insight */}
-          {journalEntries.length >= 7 && (
-            <View style={[styles.insightCard, { backgroundColor: '#6366f112', borderColor: '#6366f130' }]}>
-              <Text style={[styles.insightCallout, { color: colors.foreground }]}>
-                {journalStreak >= 7
-                  ? `🔥 ${journalStreak}-day streak! Writing daily is a superpower for behavior change.`
-                  : journalEntries.length >= 20
-                    ? `📚 ${journalEntries.length} entries logged. You're building a real record of your journey.`
-                    : `✍️ Keep going — patterns emerge after 14 entries. You're ${Math.max(0, 14 - journalEntries.length)} away.`}
-              </Text>
-            </View>
+          {Object.keys(tagCounts).length > 0 && (
+            <Reanimated.View entering={FadeInUp.delay(400).springify()} style={[SC.insightCard, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="pricetags-outline" size={16} color={BRAND.secondary} />
+                <Text style={[SC.insightTitle, { color: colors.foreground }]}>Recurring Themes</Text>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).map(([tagId, count]) => {
+                  const def = TAG_DEFS.find(t => t.id === tagId);
+                  if (!def) return null;
+                  return (
+                    <View key={tagId} style={[SC.themeChip, { backgroundColor: def.color + '15', borderColor: def.color + '40' }]}>
+                      <Text style={{ fontSize: 14 }}>{def.emoji}</Text>
+                      <View>
+                        <Text style={[SC.themeChipLabel, { color: def.color }]}>{def.label}</Text>
+                        <Text style={[SC.themeChipCount, { color: colors.textSecondary }]}>{count}×</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </Reanimated.View>
+          )}
+
+          {journalEntries.length >= 3 && (
+            <Reanimated.View entering={FadeInUp.delay(500).springify()}>
+              <LinearGradient colors={[BRAND.primary + '20', BRAND.secondary + '10']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[SC.callout, { borderColor: BRAND.primary + '30' }]}>
+                <Text style={[SC.calloutText, { color: colors.foreground }]}>
+                  {journalStreak >= 7
+                    ? `🔥 ${journalStreak}-day streak! Writing daily rewires your self-awareness.`
+                    : journalEntries.length >= 20
+                    ? `📚 ${journalEntries.length} entries. You're building a real record of your evolution.`
+                    : `✍️ ${Math.max(0, 14 - journalEntries.length)} more entries to unlock pattern insights. Keep going.`}
+                </Text>
+              </LinearGradient>
+            </Reanimated.View>
           )}
         </ScrollView>
       )}
 
       {showCelebration && (
-        <SaveCelebrationModal
-          xp={DAILY_JOURNAL_XP + (wordCount >= 50 ? WORD_COUNT_BONUS_XP : 0)}
-          currentLevel={currentLevel}
-          levelProgress={levelProgress}
-          levelMax={levelMax}
-          onClose={() => setShowCelebration(false)}
-        />
+        <CelebrationModal xp={xpToEarn} currentLevel={currentLevel} levelProgress={levelProgress} levelMax={levelMax} onClose={() => setShowCelebration(false)} />
       )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const SC = StyleSheet.create({
   root: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, gap: 12 },
-  titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  title: { fontSize: 28, fontFamily: 'Inter_700Bold', letterSpacing: -0.5 },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  heroGrad: { position: 'absolute', top: 0, left: 0, right: 0, height: 280, zIndex: 0 },
+
+  header: { paddingHorizontal: 20, paddingBottom: 12, borderBottomWidth: 1, gap: 12, zIndex: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowRadius: 20 },
+  titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
+  titleLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.5, marginBottom: 2 },
+  title: { fontSize: 34, fontFamily: 'Inter_800ExtraBold', letterSpacing: -1.5 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+
+  streakRing: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1.5 },
+  streakActive: { borderColor: '#f59e0b60', backgroundColor: '#f59e0b10', shadowColor: '#f59e0b', shadowOffset: { width: 0, height: 0 }, shadowRadius: 12 },
+  streakNum: { fontSize: 14, fontFamily: 'Inter_800ExtraBold' },
+
   levelBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
-  levelBadgeText: { fontSize: 11, fontFamily: 'Inter_700Bold', color: '#fff' },
-  iconBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  statsBar: { flexDirection: 'row', alignItems: 'center', padding: 12, borderWidth: 1, borderRadius: 14, gap: 0 },
-  statItem: { flexDirection: 'row', alignItems: 'center', gap: 5, flex: 1, justifyContent: 'center' },
-  statText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
-  statDivider: { width: 1, height: 18 },
-  tabRow: { flexDirection: 'row', borderWidth: 1, borderRadius: 14, padding: 4, gap: 2 },
-  tabBtn: { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
-  tabBtnText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
-  content: { padding: 16, gap: 14 },
-  promptCard: { borderWidth: 1, borderRadius: 18, padding: 16, gap: 10 },
-  promptBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  promptBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  promptBadgeText: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
-  promptNav: { flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1, justifyContent: 'flex-end' },
-  promptNavDot: { height: 6, borderRadius: 3 },
-  promptText: { fontSize: 16, fontFamily: 'Inter_500Medium', lineHeight: 24 },
-  contextAlert: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 8, borderRadius: 10, borderWidth: 1 },
-  contextAlertText: { fontSize: 12, fontFamily: 'Inter_500Medium', color: '#ef4444', flex: 1 },
-  editorWrap: { borderWidth: 1, borderRadius: 18, overflow: 'hidden' },
-  editorLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 2, paddingHorizontal: 16, paddingTop: 14 },
-  editorLabelSub: { fontSize: 10, fontFamily: 'Inter_400Regular' },
-  freeWriteHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 14 },
-  editorInput: {
-    padding: 16, paddingTop: 8,
-    fontSize: 15, fontFamily: 'Inter_400Regular',
-    minHeight: 160, textAlignVertical: 'top', lineHeight: 24,
-  },
-  editorMeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 12 },
-  wordCountText: { fontSize: 12, fontFamily: 'Inter_500Medium' },
-  freeWriteToggle: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
-  saveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 18, borderRadius: 18 },
-  saveBtnText: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#fff' },
-  emptyState: { alignItems: 'center', paddingVertical: 60, gap: 12 },
-  emptyTitle: { fontSize: 18, fontFamily: 'Inter_600SemiBold' },
-  emptySub: { fontSize: 14, fontFamily: 'Inter_400Regular', textAlign: 'center' },
-  insightCard: { borderWidth: 1, borderRadius: 18, padding: 16, gap: 12 },
-  insightCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  insightCardTitle: { fontSize: 15, fontFamily: 'Inter_700Bold' },
-  insightCardSub: { fontSize: 12, fontFamily: 'Inter_400Regular' },
-  insightCallout: { fontSize: 15, fontFamily: 'Inter_500Medium', lineHeight: 22 },
+  levelBadgeText: { fontSize: 11, fontFamily: 'Inter_800ExtraBold', color: '#fff', letterSpacing: 0.5 },
+
+  iconBtn: { width: 34, height: 34, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+
+  xpBarWrap: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  xpBarBg: { flex: 1, height: 4, borderRadius: 2, overflow: 'hidden' },
+  xpBarFill: { height: 4, borderRadius: 2 },
+  xpBarText: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 0.5 },
+
+  progPill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, borderWidth: 1, marginRight: 8 },
+  progPillText: { fontSize: 12, fontFamily: 'Inter_700Bold', maxWidth: 140 },
+  progPillWeek: { fontSize: 10, fontFamily: 'Inter_600SemiBold' },
+
+  tabRow: { flexDirection: 'row', borderRadius: 14, borderWidth: 1, padding: 4, gap: 2 },
+  tabBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 9, borderRadius: 10 },
+  tabText: { fontSize: 12, fontFamily: 'Inter_700Bold', letterSpacing: 0.3 },
+
+  content: { padding: 20, gap: 16 },
+
+  promptCard: { borderRadius: 20, borderWidth: 1, overflow: 'hidden', padding: 20, gap: 16 },
+  promptText: { fontSize: 26, fontFamily: 'Inter_500Medium', lineHeight: 34, fontStyle: 'italic', letterSpacing: -0.8 },
+  promptNavRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  promptNavBtn: { width: 30, height: 30, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  promptDots: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  promptDot: { height: 6, borderRadius: 3 },
+
+  progBadgeWrap: { borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
+  progBadgeGrad: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 10 },
+  progBadgeDot: { width: 20, height: 20, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+  progBadgeName: { fontSize: 11, fontFamily: 'Inter_800ExtraBold', letterSpacing: 1.2 },
+  progBadgeSub: { fontSize: 10, fontFamily: 'Inter_500Medium', color: '#808080', marginTop: 1 },
+
+  alertChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1 },
+  alertText: { fontSize: 13, fontFamily: 'Inter_400Regular', flex: 1 },
+
+  sectionLabel: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  sectionLine: { width: 3, height: 14, borderRadius: 2 },
+  sectionLabelText: { fontSize: 10, fontFamily: 'Inter_800ExtraBold', letterSpacing: 2 },
+
+  editorWrap: { borderRadius: 16, borderWidth: 1.5, overflow: 'hidden', shadowOffset: { width: 0, height: 0 }, shadowRadius: 16 },
+  editorInput: { padding: 20, fontSize: 17, fontFamily: 'Inter_400Regular', minHeight: 200, lineHeight: 28 },
+  editorFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 16 },
+  wordDot: { width: 8, height: 8, borderRadius: 4 },
+  wordText: { fontSize: 11, fontFamily: 'Inter_700Bold', letterSpacing: 0.8 },
+
+  freeToggle: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: 4 },
+  freeToggleText: { fontSize: 13, fontFamily: 'Inter_700Bold', letterSpacing: 0.3 },
+
+  tagChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1.5 },
+  tagLabel: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+
+  xpPreview: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, borderWidth: 1 },
+  xpPreviewText: { fontSize: 13, fontFamily: 'Inter_500Medium', flex: 1 },
+
+  commitBtn: { height: 62, borderRadius: 18, borderWidth: 1.5, overflow: 'hidden', justifyContent: 'center', alignItems: 'center' },
+  commitProg: { position: 'absolute', left: 0, top: 0, bottom: 0 },
+  commitText: { fontSize: 15, fontFamily: 'Inter_800ExtraBold', letterSpacing: 1.5 },
+
+  savedWrap: { borderRadius: 18, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  savedGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, width: '100%', paddingVertical: 18, paddingHorizontal: 24 },
+  savedText: { fontSize: 15, fontFamily: 'Inter_800ExtraBold', color: '#fff', letterSpacing: 1, flex: 1 },
+
+  xpBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  xpBadgeText: { fontSize: 12, fontFamily: 'Inter_800ExtraBold', color: '#000' },
+
+  historyCount: { fontSize: 20, fontFamily: 'Inter_800ExtraBold', letterSpacing: -0.5 },
+
+  emptyState: { alignItems: 'center', paddingVertical: 80, gap: 12 },
+  emptyTitle: { fontSize: 22, fontFamily: 'Inter_700Bold' },
+  emptySub: { fontSize: 14, fontFamily: 'Inter_400Regular', textAlign: 'center', lineHeight: 21 },
+
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  statCard: { width: '47%', borderWidth: 1, borderRadius: 16, padding: 14, alignItems: 'center', gap: 4 },
-  statCardVal: { fontSize: 22, fontFamily: 'Inter_700Bold' },
-  statCardLabel: { fontSize: 11, fontFamily: 'Inter_500Medium' },
-  tagChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  tagChipLabel: {
-    fontSize: 12,
-    fontFamily: 'Inter_600SemiBold',
-  },
+
+  insightCard: { borderRadius: 18, borderWidth: 1, padding: 18, gap: 14, overflow: 'hidden' },
+  insightTitle: { fontSize: 15, fontFamily: 'Inter_700Bold' },
+
+  progJournalCard: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, borderWidth: 1, overflow: 'hidden', padding: 16, gap: 12 },
+  progJournalBar: { width: 3, height: 44, borderRadius: 2 },
+  progJournalName: { fontSize: 13, fontFamily: 'Inter_700Bold', flex: 1 },
+  progJournalStat: { fontSize: 12, fontFamily: 'Inter_400Regular' },
+  weekBadge: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
+  weekBadgeText: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 0.5 },
+
+  themeChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
+  themeChipLabel: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  themeChipCount: { fontSize: 10, fontFamily: 'Inter_500Medium', marginTop: 1 },
+
+  callout: { padding: 18, borderRadius: 16, borderWidth: 1 },
+  calloutText: { fontSize: 15, fontFamily: 'Inter_500Medium', lineHeight: 23 },
 });

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, Text, View, ViewStyle, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import AnimatedReanimated, {
   useSharedValue,
   useAnimatedStyle,
@@ -12,6 +13,7 @@ import AnimatedReanimated, {
   Easing as ReanimatedEasing,
 } from 'react-native-reanimated';
 import { useColors } from '@/hooks/useColors';
+import { SoftText } from './SoftText';
 
 interface CommitmentButtonProps {
   onComplete: () => void;
@@ -21,10 +23,13 @@ interface CommitmentButtonProps {
   icon?: React.ComponentProps<typeof Ionicons>['name'];
   completedIcon?: React.ComponentProps<typeof Ionicons>['name'];
   color?: string;
+  gradient?: readonly [string, string, ...string[]];
   duration?: number;
   disabled?: boolean;
   style?: ViewStyle;
 }
+
+const { width } = Dimensions.get('window');
 
 export function CommitmentButton({
   onComplete,
@@ -33,7 +38,8 @@ export function CommitmentButton({
   subLabel,
   icon = 'finger-print',
   completedIcon = 'checkmark-sharp',
-  color = '#00D68F',
+  color,
+  gradient,
   duration = 2000,
   disabled = false,
   style,
@@ -43,7 +49,11 @@ export function CommitmentButton({
   const scale = useSharedValue(1);
   const [completed, setCompleted] = useState(false);
 
-  // Reset completion if disabled or if label/triggers change reset state
+  const activeColor = disabled ? colors.border : (color || colors.brand.success);
+  const activeGradient = disabled 
+    ? [colors.border, colors.border] as [string, string, ...string[]] 
+    : (gradient || [colors.brand.successLight, colors.brand.success] as [string, string, ...string[]]);
+
   useEffect(() => {
     if (disabled) {
       setCompleted(false);
@@ -53,7 +63,7 @@ export function CommitmentButton({
   }, [disabled]);
 
   const triggerTickHaptic = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid); // Stronger tick
   };
 
   const triggerSuccessHaptic = () => {
@@ -75,7 +85,8 @@ export function CommitmentButton({
 
   const handlePressIn = () => {
     if (disabled || completed) return;
-    scale.value = withSpring(0.96, { damping: 15, stiffness: 200 });
+    // Deeper scaling for a softer, more responsive feel
+    scale.value = withSpring(0.92, { damping: 15, stiffness: 250 });
     progress.value = withTiming(1, { duration, easing: ReanimatedEasing.bezier(0.25, 1, 0.5, 1) }, (finished) => {
       if (finished) {
         runOnJS(triggerSuccessHaptic)();
@@ -87,13 +98,13 @@ export function CommitmentButton({
 
   const handlePressOut = () => {
     if (disabled || completed) return;
-    scale.value = withSpring(1, { damping: 15, stiffness: 150 });
+    scale.value = withSpring(1, { damping: 12, stiffness: 150 }); // Bouncier return
     if (progress.value < 1) {
-      progress.value = withTiming(0, { duration: 300 });
+      progress.value = withTiming(0, { duration: 250 });
     }
   };
 
-  const fillStyle = useAnimatedStyle(() => ({
+  const fillWrapperStyle = useAnimatedStyle(() => ({
     width: `${progress.value * 100}%` as any,
   }));
 
@@ -101,8 +112,8 @@ export function CommitmentButton({
     transform: [{ scale: scale.value }],
   }));
 
-  const activeColor = disabled ? colors.border : color;
-  const textColor = completed ? '#000' : colors.text;
+  const textColor = completed ? '#FFFFFF' : colors.text;
+  const shadowStyle = colors.isDark ? colors.shadows.softDark : colors.shadows.softLight;
 
   return (
     <Pressable
@@ -112,37 +123,38 @@ export function CommitmentButton({
       style={[
         commitStyles.button,
         {
-          backgroundColor: colors.surfaceHigh,
-          borderColor: colors.border,
-          shadowColor: activeColor,
+          backgroundColor: colors.surface, // Use soft white/dark card base
+          borderColor: colors.borderSubtle,
           opacity: disabled ? 0.5 : 1,
         },
+        shadowStyle,
         style,
       ]}
     >
       <AnimatedReanimated.View style={[commitStyles.buttonAnimated, buttonStyle]}>
-        {/* Background Fill */}
+        {/* Background Fill - Animated Wrapper with Gradient inside */}
         <AnimatedReanimated.View
-          style={[
-            commitStyles.fill,
-            {
-              backgroundColor: activeColor,
-            },
-            fillStyle,
-          ]}
-        />
+          style={[commitStyles.fillWrapper, fillWrapperStyle]}
+        >
+          <LinearGradient
+            colors={activeGradient}
+            start={[0, 0]}
+            end={[1, 1]}
+            style={{ width: width - colors.spacing.lg * 2, height: '100%' }} // Fixed gradient width so it doesn't squish
+          />
+        </AnimatedReanimated.View>
         
         {/* Button Content */}
         <View style={commitStyles.content}>
-          <Ionicons name={(completed ? completedIcon : icon) as any} size={24} color={completed ? '#000' : activeColor} />
+          <Ionicons name={(completed ? completedIcon : icon) as any} size={24} color={completed ? '#FFFFFF' : activeColor} />
           <View style={commitStyles.textWrap}>
-            <Text style={[commitStyles.text, { color: textColor }]}>
+            <SoftText semiBold style={{ color: textColor }}>
               {completed ? completedLabel : label}
-            </Text>
+            </SoftText>
             {subLabel && !completed && (
-              <Text style={[commitStyles.subtext, { color: colors.textSecondary }]}>
+              <SoftText caption muted style={{ marginTop: 2 }}>
                 {subLabel}
-              </Text>
+              </SoftText>
             )}
           </View>
         </View>
@@ -155,27 +167,24 @@ const commitStyles = StyleSheet.create({
   button: {
     width: '100%',
     height: 64,
-    borderRadius: 18,
+    borderRadius: 20, // Soft UI rounded
     borderWidth: 1,
-    overflow: 'hidden',
     justifyContent: 'center',
     marginVertical: 10,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
   },
   buttonAnimated: {
     width: '100%',
     height: '100%',
     justifyContent: 'center',
+    borderRadius: 20,
+    overflow: 'hidden',
   },
-  fill: {
+  fillWrapper: {
     position: 'absolute',
     left: 0,
     top: 0,
     bottom: 0,
-    borderRadius: 17,
+    overflow: 'hidden',
   },
   content: {
     flexDirection: 'row',
@@ -188,14 +197,5 @@ const commitStyles = StyleSheet.create({
   textWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  text: {
-    fontSize: 16,
-    fontFamily: 'Inter_700Bold',
-  },
-  subtext: {
-    fontSize: 11,
-    fontFamily: 'Inter_400Regular',
-    marginTop: 2,
   },
 });
